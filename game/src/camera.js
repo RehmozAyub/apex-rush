@@ -21,6 +21,7 @@ export class CameraRig {
     this.orbit = 0;
     this.tmp = new THREE.Vector3();
     this.snap = true;
+    this.fovScale = 1; // < 1 for the very wide split-screen views
   }
 
   cycle() {
@@ -102,7 +103,7 @@ export class CameraRig {
       fovTarget = m.fov + speedRatio * 15 + boost * 7;
     }
     this.fov += (fovTarget - this.fov) * Math.min(1, realDt * 4);
-    cam.fov = this.fov;
+    cam.fov = this.fov * this.fovScale;
     cam.updateProjectionMatrix();
   }
 }

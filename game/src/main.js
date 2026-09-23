@@ -1,7 +1,7 @@
 // APEX RUSH - boot, menus, game-state machine and main loop.
 import * as THREE from 'three';
 import { Renderer } from './renderer.js';
-import { Input } from './input.js';
+import { Input, keyPlayer } from './input.js';
 import { AudioEngine } from './audio.js';
 import { UI } from './ui.js';
 import { Minimap } from './minimap.js';
@@ -22,6 +22,9 @@ class Game {
   constructor() {
     this.settings = loadSettings();
     this.sel = { track: 0, car: 0, paint: 0 };
+    this.sel2 = { car: 4, paint: 4 }; // player 2's pick in split screen
+    this.players = 1;
+    this.carPick = 0; // whose car is being chosen (2-player mode)
     this.state = 'loading';
     this.menuIndex = { title: 0, pause: 0, results: 0, settings: 0 };
     this.fmt = formatTime;
@@ -42,8 +45,9 @@ class Game {
     this.input = new Input();
     this.audio = new AudioEngine();
     this.audio.setVolumes(this.settings.master, this.settings.music);
-    this.rig = new CameraRig(this.renderer.camera);
-    this.minimap = new Minimap(document.getElementById('minimap'));
+    this.rigs = this.renderer.cameras.map((c) => new CameraRig(c));
+    this.rig = this.rigs[0];
+    this.setViews(1);
     const unlock = () => { this.audio.init(); this.audio.setVolumes(this.settings.master, this.settings.music); };
     window.addEventListener('keydown', unlock);
     window.addEventListener('pointerdown', unlock);
@@ -79,7 +83,7 @@ class Game {
     const w = MAPS[i].weather;
     this.audio.setAmbience(w ? (w.type === 'rain' ? 'rain' : 'wind') : null);
     this.renderer.setScene(world.scene, { bloom: MAPS[i].bloom, exposure: MAPS[i].exposure });
-    this.minimap.setTrack(world.track, MAPS[i].trackStyle.accent);
+    for (const m of this.minimaps) m.setTrack(world.track, MAPS[i].trackStyle.accent);
     this.buildShowroom();
     this.world.update(0, 0, this.showroomCar, this.renderer.camera);
     this.renderer.renderer.compile(world.scene, this.renderer.camera);
@@ -90,8 +94,9 @@ class Game {
     this.removeShowroom();
     const t = this.world.track;
     const p = t.pointAt(t.length - 40, 0);
-    const car = CARS[this.sel.car];
-    const model = buildCar(car.style, PAINTS[this.sel.paint].hex, { underglow: this.world.def.underglow ? PAINTS[this.sel.paint].hex : null, number: 1 });
+    const pick = this.pickSel();
+    const car = CARS[pick.car];
+    const model = buildCar(car.style, PAINTS[pick.paint].hex, { underglow: this.world.def.underglow ? PAINTS[pick.paint].hex : null, number: this.carPick + 1 });
     model.root.position.set(p.x, p.y, p.z);
     model.root.rotation.y = p.heading;
     for (const w of model.wheels) if (w.front) w.group.rotation.y = -0.35;
@@ -107,6 +112,25 @@ class Game {
     this.showroom = null;
   }
 
+  // --- split screen -------------------------------------------------------------
+  // 1 = full screen, 2 = two stacked views each with its own HUD, camera and minimap
+  setViews(n) {
+    this.renderer.setViewCount(n);
+    this.minimaps = this.ui.setViews(n).map((c) => new Minimap(c));
+    if (this.world) {
+      this.world.setViewCount(n);
+      for (const m of this.minimaps) m.setTrack(this.world.track, this.world.def.trackStyle.accent);
+    }
+    this.renderer.onView = n > 1 ? (i) => {
+      const H = this.session && this.session.humans[i];
+      if (H) this.world.prepareView(H.car.vehicle, this.renderer.cameras[i]);
+    } : null;
+    this.minimap = this.minimaps[0];
+    for (const r of this.rigs) r.fovScale = n > 1 ? 0.62 : 1;
+  }
+
+  pickSel() { return this.carPick === 1 ? this.sel2 : this.sel; }
+
   // --- screens ------------------------------------------------------------------
   showTitle() {
     this.state = 'title';
@@ -117,7 +141,7 @@ class Game {
   }
 
   titleItems() {
-    const items = [{ label: 'RACE' }, { label: 'SETTINGS' }];
+    const items = [{ label: 'RACE' }, { label: '2 PLAYERS' }, { label: 'HOW TO PLAY' }, { label: 'SETTINGS' }];
     if (IS_DESKTOP) items.push({ label: 'QUIT' });
     return items;
   }
@@ -130,10 +154,16 @@ class Game {
     this.ui.trackCards(MAPS, this.sel.track, this.trackLengths);
   }
 
-  showCars() {
+  showCars(pick = 0) {
     this.state = 'cars';
+    this.carPick = pick;
     this.ui.show('cars');
-    this.ui.carPanel(CARS[this.sel.car], PAINTS, this.sel.paint, this.sel.car, CARS.length);
+    this.refreshCar(false);
+  }
+
+  showHowTo() {
+    this.state = 'howto';
+    this.ui.show('howto');
   }
 
   settingsItems() {
@@ -210,7 +240,11 @@ class Game {
     await this.loadWorld(this.sel.track);
     this.endSession();
     this.removeShowroom();
-    this.session = new RaceSession(this, this.world, { carIndex: this.sel.car, paintIndex: this.sel.paint });
+    this.carPick = 0;
+    this.setViews(this.players);
+    const players = [{ carIndex: this.sel.car, paintIndex: this.sel.paint }];
+    if (this.players > 1) players.push({ carIndex: this.sel2.car, paintIndex: this.sel2.paint });
+    this.session = new RaceSession(this, this.world, { players });
     this.ui.clearPopups();
     this.state = 'race';
     this.ui.show('hud');
@@ -227,14 +261,14 @@ class Game {
     this.session.dispose();
     this.session = null;
     this.audio.silenceEngine();
-    const fx = this.renderer.fx;
-    fx.blur = fx.ca = fx.lines = fx.boost = fx.flash = fx.slowmo = 0;
+    for (const fx of this.renderer.fxs) fx.blur = fx.ca = fx.lines = fx.boost = fx.flash = fx.slowmo = 0;
   }
 
   async quitToMenu() {
     this.ui.fade(true);
     await new Promise((r) => setTimeout(r, 350));
     this.endSession();
+    this.setViews(1);
     this.buildShowroom();
     this.ui.overlay('hud', false);
     this.showTitle();
@@ -251,8 +285,16 @@ class Game {
       saveSettings(this.settings);
       record = ' &nbsp;<small style="color:var(--yellow)">NEW LAP RECORD</small>';
     }
-    const head = me.pos === 1 ? '<b>VICTORY</b>' : `<b>P${me.pos}</b> FINISH`;
-    this.ui.results(list, `${head} <small style="font-size:3vh;opacity:.8">&nbsp; ${this.session.takedowns} TAKEDOWNS</small>${record}`);
+    let head, tds;
+    if (this.players > 1) {
+      const [a, b] = ['P1', 'P2'].map((n) => list.find((r) => r.name === n));
+      head = a.pos < b.pos ? '<b>PLAYER 1</b> WINS' : '<b>PLAYER 2</b> WINS';
+      tds = `P1 ${a.takedowns} · P2 ${b.takedowns} TAKEDOWNS`;
+    } else {
+      head = me.pos === 1 ? '<b>VICTORY</b>' : `<b>P${me.pos}</b> FINISH`;
+      tds = `${this.session.takedowns} TAKEDOWNS`;
+    }
+    this.ui.results(list, `${head} <small style="font-size:3vh;opacity:.8">&nbsp; ${tds}</small>${record}`);
     this.state = 'results';
     this.menuIndex.results = 0;
     this.ui.show('results');
@@ -278,10 +320,13 @@ class Game {
       if (a === 'confirm') { this.audio.blip(900, 0.06, 0.1); this.showCars(); }
       if (a === 'back') this.showTitle();
     } else if (st === 'cars') {
-      if (a === 'left' || a === 'right') { this.sel.car = (this.sel.car + (a === 'left' ? -1 : 1) + CARS.length) % CARS.length; this.refreshCar(); }
-      if (a === 'up' || a === 'down') { this.sel.paint = (this.sel.paint + (a === 'up' ? -1 : 1) + PAINTS.length) % PAINTS.length; this.refreshCar(); }
-      if (a === 'confirm' && code !== 'Space') { this.audio.blip(1000, 0.08, 0.12); this.startRace(); }
-      if (a === 'back') this.showTracks();
+      const pick = this.pickSel();
+      if (a === 'left' || a === 'right') { pick.car = (pick.car + (a === 'left' ? -1 : 1) + CARS.length) % CARS.length; this.refreshCar(); }
+      if (a === 'up' || a === 'down') { pick.paint = (pick.paint + (a === 'up' ? -1 : 1) + PAINTS.length) % PAINTS.length; this.refreshCar(); }
+      if (a === 'confirm' && code !== 'Space') this.confirmCar();
+      if (a === 'back') { if (this.carPick === 1) this.showCars(0); else this.showTracks(); }
+    } else if (st === 'howto') {
+      if (a === 'confirm' || a === 'back') this.showTitle();
     } else if (st === 'settings') {
       const n = this.settingsItems().length;
       if (a === 'up' || a === 'down') { move('settings', n, a === 'up' ? -1 : 1); this.renderSettings(); }
@@ -290,8 +335,13 @@ class Game {
       if (a === 'back') this.closeSettings();
     } else if (st === 'race') {
       if (a === 'pause' || a === 'back') { this.state = 'pause'; this.menuIndex.pause = 0; this.ui.show('pause'); this.renderPause(); this.audio.silenceEngine(); }
-      if (a === 'camera') { const n = this.rig.cycle(); this.ui.popup(n + ' CAM'); }
-      if (a === 'reset') this.session.resetPlayer();
+      if (a === 'camera' || a === 'reset') {
+        // whose key was it? (split screen: P1 and P2 have their own camera / reset keys and pads)
+        const i = this.players > 1 ? (code.startsWith('pad') ? Number(code.slice(3)) : keyPlayer(a, code)) : 0;
+        if (i >= this.players) return;
+        if (a === 'camera') this.ui.popup(this.rigs[i].cycle() + ' CAM', '', '', i);
+        else this.session.resetPlayer(i);
+      }
     } else if (st === 'pause') {
       if (a === 'up' || a === 'down') { move('pause', 4, a === 'up' ? -1 : 1); this.renderPause(); }
       if (a === 'confirm' && code !== 'Space') this.pauseSelect(this.menuIndex.pause);
@@ -304,9 +354,17 @@ class Game {
 
   titleSelect(i) {
     this.audio.blip(900, 0.06, 0.1);
-    if (i === 0) this.showTracks();
-    else if (i === 1) this.showSettings('title');
+    if (i === 0) { this.players = 1; this.showTracks(); }
+    else if (i === 1) { this.players = 2; this.showTracks(); }
+    else if (i === 2) this.showHowTo();
+    else if (i === 3) this.showSettings('title');
     else window.close();
+  }
+
+  confirmCar() {
+    this.audio.blip(1000, 0.08, 0.12);
+    if (this.players > 1 && this.carPick === 0) this.showCars(1);
+    else this.startRace();
   }
 
   pauseSelect(i) {
@@ -334,10 +392,12 @@ class Game {
     }, 350);
   }
 
-  refreshCar() {
-    this.audio.blip(600, 0.03, 0.06);
-    this.ui.carPanel(CARS[this.sel.car], PAINTS, this.sel.paint, this.sel.car, CARS.length);
-    this.buildShowroom();
+  refreshCar(sound = true) {
+    if (sound) this.audio.blip(600, 0.03, 0.06);
+    const pick = this.pickSel();
+    const who = this.players > 1 ? `PLAYER ${this.carPick + 1}` : '';
+    this.ui.carPanel(CARS[pick.car], PAINTS, pick.paint, pick.car, CARS.length, who);
+    if (this.world) this.buildShowroom();
   }
 
   bindMouse() {
@@ -357,12 +417,13 @@ class Game {
     });
     document.getElementById('swatches').addEventListener('click', (e) => {
       const s = e.target.closest('i');
-      if (s) { this.sel.paint = Number(s.dataset.i); this.refreshCar(); }
+      if (s) { this.pickSel().paint = Number(s.dataset.i); this.refreshCar(); }
     });
     for (const [k, d] of [[0, -1], [1, 1]]) {
-      document.querySelectorAll('.carnav .arrow')[k].addEventListener('click', () => { this.sel.car = (this.sel.car + d + CARS.length) % CARS.length; this.refreshCar(); });
+      document.querySelectorAll('.carnav .arrow')[k].addEventListener('click', () => { const p = this.pickSel(); p.car = (p.car + d + CARS.length) % CARS.length; this.refreshCar(); });
     }
-    document.getElementById('carname').addEventListener('click', () => this.startRace());
+    document.getElementById('carname').addEventListener('click', () => this.confirmCar());
+    document.getElementById('s-howto').addEventListener('click', () => { if (this.state === 'howto') this.showTitle(); });
   }
 
   // Debug/testing: advance the race by `frames` fixed steps with optional scripted input, then render once.
@@ -390,6 +451,7 @@ class Game {
     const cam = this.renderer.camera;
     if (this.state === 'race' && this.session) {
       this.session.update(realDt);
+      if (this.players > 1) this.world.updateView(1, realDt, this.time, this.renderer.cameras[1]);
       this.watchPerformance(realDt);
     } else if (this.session && (this.state === 'pause' || (this.state === 'settings' && this.settingsFrom === 'pause'))) {
       // frozen
@@ -401,7 +463,7 @@ class Game {
       const fx = this.renderer.fx;
       fx.blur = 0; fx.lines = 0; fx.ca = 0; fx.boost = 0; fx.flash = 0; fx.slowmo = 0;
     }
-    this.renderer.fx.weather = this.world ? this.world.flash : 0;
+    for (const fx of this.renderer.fxs) fx.weather = this.world ? this.world.flash : 0;
     if (this.session) this.session.fx.setScale(this.renderer.height / (2 * Math.tan((cam.fov * Math.PI) / 360)));
     this.renderer.render(this.time);
   }

@@ -49,13 +49,13 @@ export class Minimap {
     g.clearRect(0, 0, size, size);
     g.drawImage(this.bg, 0, 0);
     for (const c of cars) {
-      if (c.isPlayer) continue;
+      if (c === player) continue;
       const [px, py] = this.map(c.vehicle.x, c.vehicle.z);
       g.beginPath();
-      g.arc(px, py, 4, 0, Math.PI * 2);
+      g.arc(px, py, c.isPlayer ? 6.5 : 4, 0, Math.PI * 2); // the other human is a bigger ringed dot
       g.fillStyle = c.vehicle.wrecked ? '#555' : '#' + c.paint.toString(16).padStart(6, '0');
       g.fill();
-      g.lineWidth = 1.5; g.strokeStyle = '#000'; g.stroke();
+      g.lineWidth = c.isPlayer ? 2.5 : 1.5; g.strokeStyle = c.isPlayer ? '#fff' : '#000'; g.stroke();
     }
     const v = player.vehicle;
     const [px, py] = this.map(v.x, v.z);

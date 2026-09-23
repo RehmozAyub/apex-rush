@@ -40,13 +40,29 @@ export function buildWorld(def, glRenderer, quality) {
   scene.environment = envRT.texture;
   scene.environmentIntensity = def.envIntensity ?? 1;
 
-  const weather = def.weather ? new Weather(scene, def.weather) : null;
+  const weathers = def.weather ? [new Weather(scene, def.weather, 1)] : [];
+  const weather = weathers[0] || null;
   const hemiBase = hemi.intensity;
 
   const snap = 1;
   const world = {
     def, scene, track, index, sky, sun, hemi, weather,
     flash: 0,
+    // split screen: a second weather box that only player 2's camera sees
+    setViewCount(n) {
+      while (def.weather && weathers.length < n) weathers.push(new Weather(scene, def.weather, weathers.length + 1));
+    },
+    updateView(i, dt, time, camera) {
+      if (i > 0 && weathers[i]) weathers[i].update(dt, time, camera);
+    },
+    // before rendering a view: sky around its camera, shadows around its car
+    prepareView(focus, camera) {
+      sky.position.copy(camera.position);
+      const fx = Math.round(focus.x / snap) * snap, fz = Math.round(focus.z / snap) * snap;
+      sun.position.set(fx + sunDir.x * 350, focus.y + sunDir.y * 350, fz + sunDir.z * 350);
+      sun.target.position.set(fx, focus.y, fz);
+      sun.target.updateMatrixWorld();
+    },
     update(dt, time, focus, camera) {
       sky.position.copy(camera.position);
       sky.material.uniforms.uTime.value = time;
@@ -68,7 +84,7 @@ export function buildWorld(def, glRenderer, quality) {
     },
     dispose() {
       envRT.dispose();
-      if (weather) weather.dispose(scene);
+      for (const wx of weathers) wx.dispose(scene);
       const seen = new Set();
       scene.traverse((o) => {
         if (o.geometry && !seen.has(o.geometry)) { seen.add(o.geometry); o.geometry.dispose(); }

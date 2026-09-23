@@ -4,7 +4,8 @@ import * as THREE from 'three';
 import { radialTexture } from './textures.js';
 
 export class Weather {
-  constructor(scene, cfg) {
+  // layer: camera layer this weather box renders on (each split-screen player has their own)
+  constructor(scene, cfg, layer = 1) {
     this.cfg = cfg;
     this.type = cfg.type;
     this.box = cfg.box || (this.type === 'rain' ? [70, 36, 70] : this.type === 'snow' ? [90, 44, 90] : [140, 30, 140]);
@@ -45,6 +46,7 @@ export class Weather {
     }
     this.mesh.frustumCulled = false;
     this.mesh.renderOrder = 4;
+    this.mesh.layers.set(layer);
     scene.add(this.mesh);
   }
 
