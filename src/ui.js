@@ -71,7 +71,7 @@ export class UI {
           <div class="bar"><div class="fill" id="h-boost"></div><div class="segs"></div></div>
           <div class="lbl">BOOST</div>
         </div>
-        <div class="h-power" id="h-power"><div class="pic"></div><div class="pname"></div><div class="pkey">E</div><div class="pbar"><i></i></div></div>
+        <div class="h-power" id="h-power"><div class="pic"></div><div class="pname"></div><div class="pkey">E</div></div>
         <div class="h-speedo">
           <svg viewBox="0 0 200 200" class="gauge">
             <path d="M 30 150 A 80 80 0 1 1 170 150" class="track"/>
@@ -159,7 +159,14 @@ export class UI {
 
   carPanel(car, paints, paintIndex, index = 0, total = 1) {
     $('#carcount').textContent = `${String(index + 1).padStart(2, '0')} / ${String(total).padStart(2, '0')}`;
-    $('#carname').textContent = car.name;
+    const nameEl = $('#carname');
+    nameEl.textContent = car.name;
+    let size = 10;
+    nameEl.style.fontSize = `${size}vh`;
+    while (nameEl.scrollWidth > nameEl.clientWidth + 1 && size > 4) {
+      size -= 0.5;
+      nameEl.style.fontSize = `${size}vh`;
+    }
     $('#cardesc').textContent = car.desc;
     $('#stats').innerHTML = [['SPEED', car.stats.speed], ['ACCEL', car.stats.accel], ['HANDLING', car.stats.handling]]
       .map(([k, v]) => `<div class="stat"><span>${k}</span><div class="sbar"><i style="width:${Math.round(v * 100)}%"></i></div></div>`).join('');
@@ -187,16 +194,14 @@ export class UI {
     e.mult.classList.toggle('active', d.multiplier > 1 || d.chain > 0);
     e.chain.style.strokeDashoffset = `${this.chainLen * (1 - d.chain)}`;
     e.rpm.style.strokeDashoffset = `${this.rpmLen * (1 - Math.min(1, d.rpm))}`;
-    const pw = d.ram > 0 ? 'ram-on' : d.power || '';
+    const pw = d.power || '';
     if (L.power !== pw) {
       L.power = pw;
       const el = $('#h-power');
-      el.className = `h-power ${pw ? 'show' : ''} p-${d.power || (d.ram > 0 ? 'ram' : '')}`;
-      const names = { shockwave: 'SHOCKWAVE', ram: 'BATTERING RAM', strike: 'LIGHTNING STRIKE', 'ram-on': 'RAM ACTIVE' };
+      el.className = `h-power ${pw ? 'show' : ''} p-${pw}`;
+      const names = { shockwave: 'SHOCKWAVE', ricochet: 'RICOCHET', strike: 'LIGHTNING STRIKE', oil: 'OIL SLICK' };
       $('.pname', el).textContent = names[pw] || '';
-      $('.pkey', el).style.display = d.power ? '' : 'none';
     }
-    if (d.ram > 0) $('#h-power .pbar i').style.width = `${d.ram * 100}%`;
     const banner = d.wrongWay ? 'WRONG WAY' : d.drafting ? 'SLIPSTREAM' : '';
     if (L.banner !== banner) { L.banner = banner; e.banner.textContent = banner; e.banner.className = banner ? (d.wrongWay ? 'bad show' : 'show') : ''; }
   }
