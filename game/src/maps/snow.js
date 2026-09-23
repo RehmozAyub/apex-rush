@@ -43,7 +43,7 @@ export default {
   smoke: [0.96, 0.97, 1.0],
   weather: { type: 'snow', count: 6000, wind: [2.5, 0.8], color: 0xffffff, spray: [0.97, 0.98, 1.0] },
   trackStyle: {
-    road: { base: '#44474e', line: '#dfe3ea', edge: '#dfe3ea', lanes: 2, roughness: 0.55, snowEdges: true, envIntensity: 1.1 },
+    road: { base: '#3e4148', line: '#dfe3ea', edge: '#dfe3ea', lanes: 2, roughness: 0.6, snowEdges: true, wet: true, envIntensity: 1.0, cracks: 1.2, seed: 55 }, // slushy
     kerb: null,
     barrier: { type: 'guardrail', color: 0xb8bec8, glow: [0xff3a1a, 0xff3a1a], glowIntensity: 1.6 },
     embankment: 0xe6ebf2,

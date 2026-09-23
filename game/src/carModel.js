@@ -127,16 +127,20 @@ function interp(keys, u) {
 }
 
 // Loft rounded-rectangle sections (superellipse) along z.
+// uv.x runs along the loft (0 = rear), uv.y around the section (0 = middle of the +x side,
+// 0.25 = top, 0.5 = -x side, 0.75 = underside). Column M duplicates column 0 for the uv seam.
 function loft(keys, length, { stations = 30, M = 28, n = 4.5 } = {}) {
   const ua = keys[0][0], ub = keys[keys.length - 1][0];
-  const pos = [], idx = [];
+  const pos = [], idx = [], uvs = [];
+  const R = M + 1;
   for (let i = 0; i < stations; i++) {
     const u = ua + (ub - ua) * (i / (stations - 1));
     const [hwB, hwT, yB, yT] = interp(keys, u);
     const z = (u - 0.5) * length;
     const mid = (yB + yT) / 2, half = (yT - yB) / 2;
-    for (let j = 0; j < M; j++) {
-      const phi = (j / M) * Math.PI * 2;
+    for (let j = 0; j <= M; j++) {
+      uvs.push(i / (stations - 1), j / M);
+      const phi = ((j % M) / M) * Math.PI * 2;
       const c = Math.cos(phi), s = Math.sin(phi);
       const yy = Math.sign(s) * Math.pow(Math.abs(s), 2 / n);
       const xx = Math.sign(c) * Math.pow(Math.abs(c), 2 / n);
@@ -146,19 +150,22 @@ function loft(keys, length, { stations = 30, M = 28, n = 4.5 } = {}) {
   }
   for (let i = 0; i < stations - 1; i++) {
     for (let j = 0; j < M; j++) {
-      const a = i * M + j, b = i * M + ((j + 1) % M), c = (i + 1) * M + j, d = (i + 1) * M + ((j + 1) % M);
+      const a = i * R + j, b = i * R + j + 1, c = (i + 1) * R + j, d = (i + 1) * R + j + 1;
       idx.push(a, b, c, b, d, c);
     }
   }
+  const sideVerts = pos.length / 3;
   for (const [ring, front] of [[0, false], [stations - 1, true]]) {
     const base = pos.length / 3;
     let cx = 0, cy = 0, cz = 0;
     for (let j = 0; j < M; j++) {
-      const k = (ring * M + j) * 3;
+      const k = (ring * R + j) * 3;
       cx += pos[k]; cy += pos[k + 1]; cz += pos[k + 2];
       pos.push(pos[k], pos[k + 1], pos[k + 2]);
+      uvs.push(0.001, 0.001);
     }
     pos.push(cx / M, cy / M, cz / M);
+    uvs.push(0.001, 0.001);
     const center = base + M;
     for (let j = 0; j < M; j++) {
       const a = base + j, b = base + ((j + 1) % M);
@@ -167,9 +174,126 @@ function loft(keys, length, { stations = 30, M = 28, n = 4.5 } = {}) {
   }
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
   g.setIndex(idx);
   g.computeVertexNormals();
+  // weld normals across the uv seam so it stays invisible
+  const nr = g.attributes.normal;
+  for (let i = 0; i < stations && i * R + M < sideVerts; i++) {
+    const a = i * R, b = i * R + M;
+    const x = nr.getX(a) + nr.getX(b), y = nr.getY(a) + nr.getY(b), z = nr.getZ(a) + nr.getZ(b);
+    const l = Math.hypot(x, y, z) || 1;
+    nr.setXYZ(a, x / l, y / l, z / l);
+    nr.setXYZ(b, x / l, y / l, z / l);
+  }
   return g;
+}
+
+// --- surface textures ------------------------------------------------------------
+// Body detail (multiplies the paint): baked shading toward the underside and wheel arches,
+// panel seams (doors, bonnet, boot), door handles and fuel cap. Cached per style.
+const bodyTexCache = new Map();
+function bodyDetailTexture(styleId, S) {
+  if (bodyTexCache.has(styleId)) return bodyTexCache.get(styleId);
+  const W = 1024, H = 512;
+  const c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const g = c.getContext('2d');
+  const yOf = (v) => (1 - v) * H; // canvas rows run opposite to uv.y (flipY)
+  const L = S.length;
+  // baked shading by angle around the body: bright on top, dark underneath
+  for (let y = 0; y < H; y++) {
+    const v = 1 - y / H, phi = v * Math.PI * 2;
+    const low = -Math.sin(phi); // 1 underneath, -1 on top
+    const t = Math.max(0, Math.min(1, (low + 0.15) / 1.1));
+    const k = 1 - 0.62 * Math.pow(t, 1.4) + 0.05 * Math.max(0, -low);
+    const col = Math.round(Math.min(255, 255 * k));
+    g.fillStyle = `rgb(${col},${col},${col})`;
+    g.fillRect(0, y, W, 1);
+  }
+  // wheel-arch shading on both lower sides
+  const half = S.wheelBase / 2;
+  for (const z of [-half, half]) {
+    const u = 0.5 + z / L;
+    for (const v of [0.9, 0.6]) {
+      const r = ((S.wheelR + 0.25) / L) * W;
+      const grd = g.createRadialGradient(u * W, yOf(v), r * 0.2, u * W, yOf(v), r);
+      grd.addColorStop(0, 'rgba(0,0,0,0.55)');
+      grd.addColorStop(1, 'rgba(0,0,0,0)');
+      g.fillStyle = grd;
+      g.fillRect(u * W - r, yOf(v) - r, r * 2, r * 2);
+    }
+  }
+  // panel seams
+  const cab = S.cabin;
+  const uFront = cab[cab.length - 1][0] - 0.015; // windscreen base / front door edge
+  const uRear = cab[1][0] + 0.03; // rear door edge
+  const uHood = uFront + 0.05, uBoot = cab[0][0] - 0.02;
+  g.strokeStyle = 'rgba(20,20,22,0.85)';
+  g.lineWidth = 2.2;
+  const vline = (u, v0, v1) => { g.beginPath(); g.moveTo(u * W, yOf(v0)); g.lineTo(u * W, yOf(v1)); g.stroke(); };
+  const hline = (v, u0, u1) => { g.beginPath(); g.moveTo(u0 * W, yOf(v)); g.lineTo(u1 * W, yOf(v)); g.stroke(); };
+  // doors on both sides: +x side spans v 0.86..1 and 0..0.09, -x side 0.41..0.64
+  for (const u of [uFront, uRear]) { vline(u, 0.86, 1); vline(u, 0, 0.09); vline(u, 0.41, 0.64); }
+  hline(0.86, uRear, uFront); hline(0.64, uRear, uFront);
+  // bonnet and boot lids across the top
+  if (uHood < 0.97) { vline(uHood, 0.16, 0.34); hline(0.16, uHood, 0.985); hline(0.34, uHood, 0.985); }
+  if (uBoot > 0.04) { vline(uBoot, 0.17, 0.33); hline(0.17, 0.02, uBoot); hline(0.33, 0.02, uBoot); }
+  // door handles and fuel cap
+  g.fillStyle = 'rgba(15,15,17,0.9)';
+  for (const v of [0.055, 0.445]) g.fillRect((uRear + 0.012) * W, yOf(v) - 3, 0.035 * W, 6);
+  g.beginPath(); g.arc((uBoot + 0.05) * W, yOf(0.47), 7, 0, Math.PI * 2); g.stroke();
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 4;
+  bodyTexCache.set(styleId, t);
+  return t;
+}
+
+// Metallic flake: tiny random normals under the smooth clearcoat.
+let flakeTex = null;
+function flakeNormalTexture() {
+  if (flakeTex) return flakeTex;
+  const N = 128, data = new Uint8Array(N * N * 4);
+  let sd = 9;
+  const r = () => { sd = (sd * 16807) % 2147483647; return (sd - 1) / 2147483646; };
+  for (let i = 0; i < N * N; i++) {
+    const x = (r() - 0.5) * 0.9, y = (r() - 0.5) * 0.9, z = Math.sqrt(Math.max(0, 1 - x * x - y * y));
+    data[i * 4] = (x * 0.5 + 0.5) * 255; data[i * 4 + 1] = (y * 0.5 + 0.5) * 255; data[i * 4 + 2] = (z * 0.5 + 0.5) * 255; data[i * 4 + 3] = 255;
+  }
+  flakeTex = new THREE.DataTexture(data, N, N, THREE.RGBAFormat);
+  flakeTex.wrapS = flakeTex.wrapT = THREE.RepeatWrapping;
+  flakeTex.repeat.set(36, 18);
+  flakeTex.generateMipmaps = true;
+  flakeTex.minFilter = THREE.LinearMipmapLinearFilter;
+  flakeTex.magFilter = THREE.LinearFilter;
+  flakeTex.needsUpdate = true;
+  return flakeTex;
+}
+
+// Glass roughness: glossy panes, matte A/B pillars, drip rails and window seals.
+let glassRough = null;
+function glassRoughnessTexture() {
+  if (glassRough) return glassRough;
+  const W = 512, H = 256;
+  const c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const g = c.getContext('2d');
+  g.fillStyle = 'rgb(10,10,10)';
+  g.fillRect(0, 0, W, H);
+  g.fillStyle = 'rgb(170,170,170)';
+  const yOf = (v) => (1 - v) * H;
+  const band = (u0, u1, v0, v1) => g.fillRect(u0 * W, yOf(v1), (u1 - u0) * W, (v1 - v0) * H);
+  for (const [v0, v1] of [[0.86, 1], [0, 0.12], [0.38, 0.64]]) {
+    band(0.43, 0.5, v0, v1); // B pillar
+    band(0.86, 0.93, v0, v1); // A pillar
+    band(0.0, 0.05, v0, v1); // C pillar / rear edge
+  }
+  for (const v of [0.12, 0.38]) band(0, 1, v - 0.012, v + 0.012); // drip rails along the roof edge
+  for (const v of [0.86, 0.64]) band(0, 1, v - 0.01, v + 0.01); // lower window seals
+  glassRough = new THREE.CanvasTexture(c);
+  glassRough.colorSpace = THREE.NoColorSpace;
+  return glassRough;
 }
 
 // --- geometry helpers -----------------------------------------------------------
@@ -194,7 +318,11 @@ function mergeClean(list, keepUv = false) {
 
 class Parts {
   constructor() { this.b = {}; }
-  add(key, geo) { (this.b[key] ||= []).push(geo); return geo; }
+  add(key, geo, keepUv = false) {
+    if (!keepUv && geo.attributes.uv) geo.deleteAttribute('uv');
+    (this.b[key] ||= []).push(geo);
+    return geo;
+  }
   box(key, w, h, d, x, y, z, rx = 0, ry = 0, rz = 0) { return this.add(key, xf(new THREE.BoxGeometry(w, h, d), x, y, z, rx, ry, rz)); }
   // cylinder whose axis points along z (lamps, exhausts)
   tube(key, r, len, seg, x, y, z, r2 = r, open = false) { return this.add(key, xf(new THREE.CylinderGeometry(r, r2, len, seg, 1, open), x, y, z, Math.PI / 2)); }
@@ -202,7 +330,7 @@ class Parts {
     const meshes = {};
     for (const [key, list] of Object.entries(this.b)) {
       if (!list.length) continue;
-      const mesh = new THREE.Mesh(mergeClean(list), mats[key]);
+      const mesh = new THREE.Mesh(mergeClean(list, true), mats[key]);
       mesh.castShadow = cast;
       mesh.receiveShadow = receive;
       parent.add(mesh);
@@ -217,7 +345,7 @@ const shared = {};
 const texCache = new Map();
 function sharedMats() {
   if (shared.glass) return shared;
-  shared.glass = new THREE.MeshPhysicalMaterial({ color: 0x07090d, metalness: 0.2, roughness: 0.04, clearcoat: 1, clearcoatRoughness: 0.02, envMapIntensity: 1.6 });
+  shared.glass = new THREE.MeshPhysicalMaterial({ color: 0x07090d, metalness: 0.25, roughness: 1, roughnessMap: glassRoughnessTexture(), envMapIntensity: 1.7 });
   shared.tire = new THREE.MeshStandardMaterial({ color: 0x111113, roughness: 0.85 });
   shared.trim = new THREE.MeshStandardMaterial({ color: 0x0d0e11, metalness: 0.3, roughness: 0.55 });
   shared.carbon = new THREE.MeshStandardMaterial({ color: 0x1a1c20, metalness: 0.5, roughness: 0.3 });
@@ -343,7 +471,10 @@ export function buildCar(styleId, paintHex, { underglow = null, number = null } 
   const body = new THREE.Group();
   root.add(body);
 
-  const paint = new THREE.MeshPhysicalMaterial({ color: paintHex, metalness: 0.55, roughness: 0.32, clearcoat: 1, clearcoatRoughness: 0.04, envMapIntensity: 1.25, side: THREE.DoubleSide });
+  const paint = new THREE.MeshPhysicalMaterial({
+    color: paintHex, metalness: 0.6, roughness: 0.38, clearcoat: 1, clearcoatRoughness: 0.03, envMapIntensity: 1.3, side: THREE.DoubleSide,
+    map: bodyDetailTexture(styleId, S), normalMap: flakeNormalTexture(), normalScale: new THREE.Vector2(0.14, 0.14),
+  });
   const pc = new THREE.Color(paintHex);
   const lum = 0.2126 * pc.r + 0.7152 * pc.g + 0.0722 * pc.b;
   const stripe = new THREE.MeshPhysicalMaterial({ color: lum > 0.45 ? 0x121316 : 0xf2f2f2, metalness: 0.2, roughness: 0.35, clearcoat: 1, clearcoatRoughness: 0.05 });
@@ -352,8 +483,8 @@ export function buildCar(styleId, paintHex, { underglow = null, number = null } 
   const amberMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0xffb040).multiplyScalar(3) });
 
   const p = new Parts();
-  p.add('paint', loft(S.body, L, { n: S.n }));
-  p.add('glass', loft(cab, L, { n: 4, stations: 18, M: 24 }));
+  p.add('paint', loft(S.body, L, { n: S.n, stations: 44, M: 36 }), true);
+  p.add('glass', loft(cab, L, { n: 4, stations: 24, M: 32 }), true);
   const roofKeys = cab.slice(1, -1).map(([u, , hwT, , yT]) => [u, hwT * 0.98, hwT * 0.86, yT - 0.06, yT + 0.015]);
   p.add(F.roofTrim ? 'carbon' : 'paint', loft(roofKeys, L, { n: 4, stations: 12, M: 20 }));
 

@@ -70,7 +70,7 @@ export default {
   hemi: { sky: 0x9fb0ff, ground: 0x6a4030, intensity: 0.9 },
   smoke: [0.85, 0.78, 0.72],
   trackStyle: {
-    road: { base: '#3a3a40', line: '#f2f2f2', edge: '#f2f2f2', lanes: 3, roughness: 0.8 },
+    road: { base: '#4a4a50', line: '#f2f2f2', edge: '#f2f2f2', lanes: 3, roughness: 0.86, cracks: 0.8, patches: 2, aggregate: 1.15, seed: 21 }, // sun-bleached
     kerb: ['#d01818', '#f2f2f2'],
     barrier: { type: 'guardrail', color: 0xd8dde4 },
     embankment: 0x7a6a4a,

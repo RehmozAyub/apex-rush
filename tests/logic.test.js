@@ -202,3 +202,24 @@ test('hit boxes for the shot and oil slick', () => {
   assert.ok(!inBox(4, 2, 1, 2.6, 1.9));
   assert.ok(!inBox(0, 5, 1, 2.6, 1.9));
 });
+
+import { generatePixels } from '../game/src/asphalt-core.js';
+
+test('asphalt generator produces full RGBA maps with sane normals', () => {
+  const r = generatePixels({ base: '#3a3a40', wet: true, cracks: 1, patches: 1 }, 64);
+  assert.equal(r.W, 64);
+  assert.equal(r.H, 128);
+  for (const k of ['albedo', 'normal', 'rough']) assert.equal(r[k].length, 64 * 128 * 4);
+  let minZ = 255;
+  for (let i = 0; i < 64 * 128; i++) {
+    assert.equal(r.albedo[i * 4 + 3], 255);
+    minZ = Math.min(minZ, r.normal[i * 4 + 2]);
+  }
+  assert.ok(minZ > 127, `normals should point out of the surface (min z ${minZ})`);
+});
+
+test('asphalt generation is deterministic per seed', () => {
+  const a = generatePixels({ seed: 5 }, 32), b = generatePixels({ seed: 5 }, 32), c = generatePixels({ seed: 6 }, 32);
+  assert.deepEqual(a.albedo, b.albedo);
+  assert.notDeepEqual(a.albedo, c.albedo);
+});
