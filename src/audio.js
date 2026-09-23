@@ -58,7 +58,7 @@ export class AudioEngine {
     const d = this.noiseBuf.getChannelData(0);
     for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
 
-    this.buildEngine();
+    this.engines = [];
     this.timer = setInterval(() => this.schedule(), 25);
     if (this.pendingAmbience) { this.setAmbience(this.pendingAmbience); this.pendingAmbience = null; }
   }
@@ -78,9 +78,10 @@ export class AudioEngine {
     return n;
   }
 
+  // One synthesized engine (plus tyres, wind, boost) per human player.
   buildEngine() {
     const ctx = this.ctx;
-    const e = this.engine = {};
+    const e = {};
     e.gain = ctx.createGain();
     e.gain.gain.value = 0;
     e.filter = ctx.createBiquadFilter();
@@ -126,11 +127,15 @@ export class AudioEngine {
     e.scrapeGain = ctx.createGain(); e.scrapeGain.gain.value = 0;
     e.scrape.connect(e.scrapeFilter); e.scrapeFilter.connect(e.scrapeGain); e.scrapeGain.connect(this.sfx);
     for (const n of [e.o1, e.o2, e.o3, e.whine, e.hiss, e.tyre, e.wind, e.scrape]) n.start();
-    this.gear = 1;
+    return e;
+  }
+
+  engineState(i = 0) {
+    return this.state?.[i] || {};
   }
 
   // Called every frame while a car is driven.
-  updateEngine({ speed, top, throttle, boost, slip, scraping, active, slowmo = 0 }) {
+  updateEngine({ speed, top, throttle, boost, slip, scraping, active, slowmo = 0, volume = 1 }, i = 0) {
     const ratios = [0, 0.18, 0.32, 0.47, 0.62, 0.8, 1.05];
     let gear = 1;
     while (gear < 6 && speed > ratios[gear] * top) gear++;
@@ -138,17 +143,20 @@ export class AudioEngine {
     let rpm = Math.max(0, Math.min(1, (speed - lo) / Math.max(1, hi - lo)));
     rpm = 0.25 + rpm * 0.75;
     if (speed < 1) rpm = 0.18 + throttle * 0.35; // revving on the grid
-    this.gear = gear;
-    this.rpm = rpm;
+    this.state ||= [];
+    this.state[i] = { gear, rpm };
+    if (i === 0) { this.gear = gear; this.rpm = rpm; }
     if (!this.ctx) return;
-    const e = this.engine, t = this.ctx.currentTime;
+    if (!this.engines[i]) this.engines[i] = this.buildEngine();
+    const e = this.engines[i], t = this.ctx.currentTime;
+    active = active && volume > 0;
     const pitch = 1 - slowmo * 0.45;
     const f = (38 + rpm * 125) * pitch;
     e.o1.frequency.setTargetAtTime(f, t, 0.03);
     e.o2.frequency.setTargetAtTime(f * 0.5, t, 0.03);
     e.o3.frequency.setTargetAtTime(f * 1.505, t, 0.03);
     e.filter.frequency.setTargetAtTime(350 + throttle * 1500 + rpm * 1600 + boost * 900, t, 0.05);
-    e.gain.gain.setTargetAtTime(active ? 0.1 + throttle * 0.1 + boost * 0.04 : 0, t, 0.08);
+    e.gain.gain.setTargetAtTime(active ? (0.1 + throttle * 0.1 + boost * 0.04) * volume : 0, t, 0.08);
     e.whine.frequency.setTargetAtTime(f * 9 + 400, t, 0.05);
     e.whineGain.gain.setTargetAtTime(active ? boost * 0.03 + rpm * 0.005 : 0, t, 0.1);
     e.hissGain.gain.setTargetAtTime(active ? boost * 0.08 : 0, t, 0.08);
@@ -162,7 +170,7 @@ export class AudioEngine {
 
   silenceEngine() {
     if (!this.ctx) return;
-    this.updateEngine({ speed: 0, top: 1, throttle: 0, boost: 0, slip: 0, scraping: 0, active: false });
+    for (let i = 0; i < this.engines.length; i++) this.updateEngine({ speed: 0, top: 1, throttle: 0, boost: 0, slip: 0, scraping: 0, active: false }, i);
   }
 
   env(node, t, a, peak, dec) {

@@ -104,13 +104,8 @@ export class PickupVisuals {
       new THREE.MeshBasicMaterial({ color: new THREE.Color(0xff6a00).multiplyScalar(3), transparent: true, opacity: 0.35, blending: THREE.AdditiveBlending, depthWrite: false }),
       new THREE.MeshBasicMaterial({ color: new THREE.Color(0xffffff).multiplyScalar(4) }),
     ];
-    this.shot = new THREE.Group();
-    this.shot.add(new THREE.Mesh(new THREE.IcosahedronGeometry(0.42, 2), this.shotMats[0]));
-    this.shot.add(new THREE.Mesh(new THREE.SphereGeometry(1.0, 20, 14), this.shotMats[1]));
-    this.shotRing = new THREE.Mesh(new THREE.TorusGeometry(0.75, 0.05, 6, 32), this.shotMats[2]);
-    this.shot.add(this.shotRing);
-    this.shot.visible = false;
-    scene.add(this.shot);
+    this.shotGeos = [new THREE.IcosahedronGeometry(0.42, 2), new THREE.SphereGeometry(1.0, 20, 14), new THREE.TorusGeometry(0.75, 0.05, 6, 32)];
+    this.shotsLive = new Set();
 
     // oil slicks: near-black puddle with a painted rainbow sheen (a glossy material would just
     // mirror the sky at racing-camera angles)
@@ -120,15 +115,32 @@ export class PickupVisuals {
     this.slicks = new Map();
   }
 
-  showShot(x, y, z, time) {
-    this.shot.visible = true;
-    this.shot.position.set(x, y, z);
-    this.shotRing.rotation.set(time * 9, time * 6, 0);
-    const k = 1 + Math.sin(time * 30) * 0.12;
-    this.shot.scale.setScalar(k);
+  // one glowing orb per ricochet shot in flight
+  addShot() {
+    const g = new THREE.Group();
+    g.add(new THREE.Mesh(this.shotGeos[0], this.shotMats[0]));
+    g.add(new THREE.Mesh(this.shotGeos[1], this.shotMats[1]));
+    const ring = new THREE.Mesh(this.shotGeos[2], this.shotMats[2]);
+    g.add(ring);
+    g.userData.ring = ring;
+    g.visible = false;
+    this.scene.add(g);
+    this.shotsLive.add(g);
+    return g;
   }
 
-  hideShot() { this.shot.visible = false; }
+  showShot(g, x, y, z, time) {
+    g.visible = true;
+    g.position.set(x, y, z);
+    g.userData.ring.rotation.set(time * 9, time * 6, 0);
+    g.scale.setScalar(1 + Math.sin(time * 30) * 0.12);
+  }
+
+  removeShot(g) {
+    this.scene.remove(g);
+    this.shotsLive.delete(g);
+  }
+
 
   addSlick(id, x, y, z, heading, halfS, halfLat) {
     const g = new THREE.Group();
@@ -225,9 +237,10 @@ export class PickupVisuals {
   }
 
   dispose() {
-    this.scene.remove(this.group, this.shock, this.bolt, this.shot);
+    this.scene.remove(this.group, this.shock, this.bolt);
+    for (const g of [...this.shotsLive]) this.removeShot(g);
+    for (const g of this.shotGeos) g.dispose();
     for (const id of [...this.slicks.keys()]) this.removeSlick(id);
-    this.shot.traverse((o) => { if (o.geometry) o.geometry.dispose(); });
     this.oilGeo.dispose();
     for (const g of this.geos) g.dispose();
     this.boltGeo.dispose();

@@ -86,6 +86,56 @@ function speedFxShader(samples) {
   };
 }
 
+// One "view" = a camera + its own post-processing chain (bloom, speed FX, output, FXAA).
+// Single player uses one full-screen view; split screen uses two stacked views.
+class View {
+  constructor(renderer, camera, quality) {
+    this.camera = camera;
+    this.fx = { blur: 0, ca: 0, lines: 0, boost: 0, flash: 0, slowmo: 0, weather: 0 };
+    const q = quality;
+    this.composer = new EffectComposer(renderer);
+    this.renderPass = new RenderPass(new THREE.Scene(), camera);
+    this.composer.addPass(this.renderPass);
+    this.bloom = new UnrealBloomPass(new THREE.Vector2(512, 512), 0.6, 0.55, 0.9);
+    this.bloom.enabled = q.bloom;
+    this.composer.addPass(this.bloom);
+    this.fxPass = new ShaderPass(speedFxShader(q.blurSamples));
+    this.composer.addPass(this.fxPass);
+    this.composer.addPass(new OutputPass());
+    this.fxaa = new ShaderPass(FXAAShader);
+    this.composer.addPass(this.fxaa);
+  }
+
+  setBloom(b) {
+    this.bloom.strength = b.strength;
+    this.bloom.radius = b.radius;
+    this.bloom.threshold = b.threshold;
+  }
+
+  resize(w, h, pr) {
+    this.composer.setPixelRatio(pr);
+    this.composer.setSize(w, h);
+    this.camera.aspect = w / h;
+    this.camera.updateProjectionMatrix();
+    this.fxaa.material.uniforms.resolution.value.set(1 / (w * pr), 1 / (h * pr));
+    this.fxPass.material.uniforms.uAspect.value = w / h;
+  }
+
+  render(time, motionBlur) {
+    const u = this.fxPass.material.uniforms, fx = this.fx;
+    u.uBlur.value = motionBlur ? fx.blur : 0;
+    u.uCA.value = fx.ca;
+    u.uLines.value = fx.lines;
+    u.uBoost.value = fx.boost;
+    u.uFlash.value = fx.flash + (fx.weather || 0) * 0.22;
+    u.uSlowmo.value = fx.slowmo;
+    u.uTime.value = time;
+    this.composer.render();
+  }
+
+  dispose() { this.composer.dispose(); }
+}
+
 export class Renderer {
   constructor(canvas, quality) {
     this.canvas = canvas;
@@ -96,77 +146,98 @@ export class Renderer {
     r.toneMappingExposure = 1.0;
     r.shadowMap.enabled = true;
     r.shadowMap.type = THREE.PCFShadowMap;
-    this.camera = new THREE.PerspectiveCamera(65, 16 / 9, 0.3, 6000);
+    // camera i also sees layer i + 1 (per-player weather particles)
+    this.cameras = [0, 1].map((i) => {
+      const cam = new THREE.PerspectiveCamera(65, 16 / 9, 0.3, 6000);
+      cam.layers.enable(i + 1);
+      return cam;
+    });
+    this.camera = this.cameras[0];
+    this.fxs = [];
     this.scene = null;
-    this.fx = { blur: 0, ca: 0, lines: 0, boost: 0, flash: 0, slowmo: 0 };
+    this.viewCount = 1;
     this.motionBlur = true;
+    this.onView = null; // (index) => void, called before each view renders
     this.setQuality(quality);
     window.addEventListener('resize', () => this.resize());
   }
 
+  get fx() { return this.fxs[0]; }
+
   setQuality(q) {
     this.quality = q;
-    this.buildComposer();
+    this.buildViews();
     this.resize();
   }
 
-  buildComposer() {
-    const q = this.quality;
-    if (this.composer) this.composer.dispose();
-    const r = this.renderer;
-    this.composer = new EffectComposer(r);
-    this.renderPass = new RenderPass(this.scene || new THREE.Scene(), this.camera);
-    this.composer.addPass(this.renderPass);
-    this.bloom = new UnrealBloomPass(new THREE.Vector2(512, 512), 0.6, 0.55, 0.9);
-    this.bloom.enabled = q.bloom;
-    this.composer.addPass(this.bloom);
-    this.fxPass = new ShaderPass(speedFxShader(q.blurSamples));
-    this.composer.addPass(this.fxPass);
-    this.composer.addPass(new OutputPass());
-    this.fxaa = new ShaderPass(FXAAShader);
-    this.composer.addPass(this.fxaa);
-    if (this.bloomSettings) this.setBloom(this.bloomSettings);
+  setViewCount(n) {
+    if (n === this.viewCount && this.views) return;
+    this.viewCount = n;
+    this.buildViews();
+    this.resize();
+  }
+
+  buildViews() {
+    if (this.views) for (const v of this.views) v.dispose();
+    this.views = [];
+    for (let i = 0; i < this.viewCount; i++) {
+      // split screen draws the world twice, so it uses a lighter blur
+      const q = this.viewCount > 1 ? { ...this.quality, blurSamples: Math.min(8, this.quality.blurSamples) } : this.quality;
+      const v = new View(this.renderer, this.cameras[i], q);
+      if (this.scene) v.renderPass.scene = this.scene;
+      if (this.bloomSettings) v.setBloom(this.bloomSettings);
+      this.views.push(v);
+    }
+    // keep fx objects stable so callers can hold on to them
+    this.fxs = this.views.map((v, i) => (this.fxs[i] ? Object.assign(v.fx, this.fxs[i]) : v.fx));
+    this.views.forEach((v, i) => { v.fx = this.fxs[i]; });
+    // single-player code paths use these directly
+    this.bloom = this.views[0].bloom;
   }
 
   setScene(scene, { bloom, exposure }) {
     this.scene = scene;
-    this.renderPass.scene = scene;
+    for (const v of this.views) v.renderPass.scene = scene;
     this.renderer.toneMappingExposure = exposure;
     this.setBloom(bloom);
   }
 
   setBloom(b) {
     this.bloomSettings = b;
-    this.bloom.strength = b.strength;
-    this.bloom.radius = b.radius;
-    this.bloom.threshold = b.threshold;
+    for (const v of this.views) v.setBloom(b);
   }
 
   resize() {
     const w = window.innerWidth, h = window.innerHeight;
-    const pr = Math.min(window.devicePixelRatio || 1, this.quality.pixelRatio);
+    const pr = Math.min(window.devicePixelRatio || 1, this.quality.pixelRatio, this.viewCount > 1 ? 1 : Infinity);
     this.pixelRatio = pr;
     this.renderer.setPixelRatio(pr);
     this.renderer.setSize(w, h, false);
-    this.composer.setPixelRatio(pr);
-    this.composer.setSize(w, h);
-    this.camera.aspect = w / h;
-    this.camera.updateProjectionMatrix();
-    this.fxaa.material.uniforms.resolution.value.set(1 / (w * pr), 1 / (h * pr));
-    this.fxPass.material.uniforms.uAspect.value = w / h;
-    this.height = h * pr;
+    const vh = h / this.viewCount;
+    for (const v of this.views) v.resize(w, vh, pr);
+    this.height = vh * pr;
   }
 
   render(time) {
     if (!this.scene) return;
-    const u = this.fxPass.material.uniforms;
-    u.uBlur.value = this.motionBlur ? this.fx.blur : 0;
-    u.uCA.value = this.fx.ca;
-    u.uLines.value = this.fx.lines;
-    u.uBoost.value = this.fx.boost;
-    u.uFlash.value = this.fx.flash + (this.fx.weather || 0) * 0.22;
-    u.uSlowmo.value = this.fx.slowmo;
-    u.uTime.value = time;
-    this.composer.render();
+    const r = this.renderer;
+    const w = window.innerWidth, h = window.innerHeight;
+    if (this.viewCount === 1) {
+      if (this.onView) this.onView(0);
+      this.views[0].render(time, this.motionBlur);
+      return;
+    }
+    // split screen: view 0 on top, view 1 below (GL viewport origin is bottom-left)
+    const vh = h / this.viewCount;
+    r.setScissorTest(true);
+    for (let i = 0; i < this.viewCount; i++) {
+      const y = h - vh * (i + 1);
+      r.setViewport(0, y, w, vh);
+      r.setScissor(0, y, w, vh);
+      if (this.onView) this.onView(i);
+      this.views[i].render(time, this.motionBlur);
+    }
+    r.setScissorTest(false);
+    r.setViewport(0, 0, w, h);
   }
 }

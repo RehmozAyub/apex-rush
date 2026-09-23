@@ -54,32 +54,40 @@ export class UI {
         </div>
       </section>
 
-      <section id="s-hud" class="screen hud">
-        <div class="h-pos"><div class="lbl">POS</div><div class="big"><span id="h-pos">1</span><small>/<span id="h-total">6</span></small></div>
-          <div class="h-lap">LAP <span id="h-lap">1</span>/<span id="h-laps">3</span></div></div>
-        <div class="h-times">
-          <div class="row"><span class="lbl">LAP</span><span id="h-laptime">0:00.00</span></div>
-          <div class="row dim"><span class="lbl">BEST</span><span id="h-best">--:--.--</span></div>
-          <div class="row td"><span class="lbl">TAKEDOWNS</span><span id="h-td">0</span></div>
+      <section id="s-hud" class="screen hud"></section>
+
+      <section id="s-howto" class="screen">
+        <h1 class="head"><b>HOW TO</b> PLAY</h1>
+        <div class="howto">
+          <div class="col">
+            <h2>THE RACE</h2>
+            <p>3 laps, 8 cars. Finish first and wreck rivals on the way.</p>
+            <h2>BOOST</h2>
+            <p>Fill the meter by <b>drifting</b>, <b>near misses</b>, <b>slipstreaming</b> behind rivals, <b>takedowns</b> and <b>boost rings</b> on the road. Chain moves quickly for an adrenaline multiplier up to <b>×5</b>.</p>
+            <h2>TAKEDOWNS</h2>
+            <p>Slam a rival hard, or shove them into a wall. Hit a wall head-on or get rammed and you crash.</p>
+            <h2>POWER-UPS</h2>
+            <p><i class="pu c1"></i><b>SHOCKWAVE</b> wrecks everyone near you</p>
+            <p><i class="pu c2"></i><b>RICOCHET</b> bouncing shot that hunts down the road</p>
+            <p><i class="pu c3"></i><b>LIGHTNING STRIKE</b> hits the car ahead</p>
+            <p><i class="pu c4"></i><b>OIL SLICK</b> dropped behind you, chasers crash</p>
+          </div>
+          <div class="col">
+            <h2>CONTROLS</h2>
+            <table class="keys">
+              <tr><th></th><th>1 PLAYER</th><th>2P · PLAYER 1</th><th>2P · PLAYER 2</th><th>GAMEPAD</th></tr>
+              <tr><td>Drive</td><td>WASD / Arrows</td><td>W A S D</td><td>Arrows</td><td>RT · LT · Stick</td></tr>
+              <tr><td>Drift</td><td>Space</td><td>Space</td><td>Right Ctrl / 0</td><td>X</td></tr>
+              <tr><td>Boost</td><td>Shift</td><td>Left Shift</td><td>Right Shift</td><td>A</td></tr>
+              <tr><td>Power-up</td><td>E</td><td>E</td><td>Enter</td><td>LB</td></tr>
+              <tr><td>Camera</td><td>C</td><td>C</td><td>\\</td><td>Y</td></tr>
+              <tr><td>Reset car</td><td>R</td><td>R</td><td>]</td><td></td></tr>
+              <tr><td>Pause</td><td>Esc</td><td colspan="2">Esc</td><td>Start</td></tr>
+            </table>
+            <p class="note">Two gamepads? The first controls player 1, the second player 2. F11 toggles fullscreen.</p>
+          </div>
         </div>
-        <div class="h-center"><div id="h-banner"></div></div>
-        <div id="popups"></div>
-        <div id="countdown"></div>
-        <canvas id="minimap" width="200" height="200"></canvas>
-        <div class="h-boost">
-          <div class="mult" id="h-mult"><span>×1</span><svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="17" id="h-chain"/></svg></div>
-          <div class="bar"><div class="fill" id="h-boost"></div><div class="segs"></div></div>
-          <div class="lbl">BOOST</div>
-        </div>
-        <div class="h-power" id="h-power"><div class="pic"></div><div class="pname"></div><div class="pkey">E</div></div>
-        <div class="h-speedo">
-          <svg viewBox="0 0 200 200" class="gauge">
-            <path d="M 30 150 A 80 80 0 1 1 170 150" class="track"/>
-            <path d="M 30 150 A 80 80 0 1 1 170 150" class="rpm" id="h-rpm"/>
-          </svg>
-          <div class="spd"><span id="h-speed">0</span><small>KM/H</small></div>
-          <div class="gear">GEAR <b id="h-gear">1</b></div>
-        </div>
+        <div class="hints">ENTER / ESC BACK</div>
       </section>
 
       <section id="s-pause" class="screen dim">
@@ -101,18 +109,61 @@ export class UI {
     this.screens = {};
     for (const s of root.querySelectorAll('.screen')) this.screens[s.id.slice(2)] = s;
     this.current = 'loading';
-    this.el = {
-      pos: $('#h-pos'), total: $('#h-total'), lap: $('#h-lap'), laps: $('#h-laps'), laptime: $('#h-laptime'), best: $('#h-best'),
-      td: $('#h-td'), boost: $('#h-boost'), mult: $('#h-mult'), chain: $('#h-chain'), speed: $('#h-speed'), gear: $('#h-gear'),
-      rpm: $('#h-rpm'), banner: $('#h-banner'), popups: $('#popups'), countdown: $('#countdown'), hud: this.screens.hud,
-    };
-    const segs = $('.segs', root);
-    for (let i = 0; i < 10; i++) segs.appendChild(document.createElement('i'));
-    this.rpmLen = this.el.rpm.getTotalLength();
-    this.el.rpm.style.strokeDasharray = `${this.rpmLen}`;
     this.chainLen = 2 * Math.PI * 17;
-    this.el.chain.style.strokeDasharray = `${this.chainLen}`;
-    this.last = {};
+    this.setViews(1);
+  }
+
+  // Build one HUD per player. In split screen each HUD fills its half of the screen.
+  // Returns the minimap canvases.
+  setViews(n) {
+    const host = this.screens.hud;
+    host.classList.toggle('split', n > 1);
+    host.innerHTML = '';
+    this.huds = [];
+    for (let i = 0; i < n; i++) {
+      const v = document.createElement('div');
+      v.className = `hudview v${i}`;
+      v.innerHTML = /* html */ `<div class="hudinner">
+        <div class="h-pos">${n > 1 ? `<div class="ptag p${i + 1}">PLAYER ${i + 1}</div>` : ''}<div class="lbl">POS</div><div class="big"><span class="x-pos">1</span><small>/<span class="x-total">8</span></small></div>
+          <div class="h-lap">LAP <span class="x-lap">1</span>/<span class="x-laps">3</span></div></div>
+        <div class="h-times">
+          <div class="row"><span class="lbl">LAP</span><span class="x-laptime">0:00.00</span></div>
+          <div class="row dim"><span class="lbl">BEST</span><span class="x-best">--:--.--</span></div>
+          <div class="row td"><span class="lbl">TAKEDOWNS</span><span class="x-td">0</span></div>
+        </div>
+        <div class="h-center"><div class="h-banner"></div></div>
+        <div class="popups"></div>
+        <div class="countdown"></div>
+        <canvas class="minimap" width="200" height="200"></canvas>
+        <div class="h-boost">
+          <div class="mult"><span>×1</span><svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="17" class="x-chain"/></svg></div>
+          <div class="bar"><div class="fill x-boost"></div><div class="segs">${'<i></i>'.repeat(10)}</div></div>
+          <div class="lbl">BOOST</div>
+        </div>
+        <div class="h-power"><div class="pic"></div><div class="pname"></div><div class="pkey">E</div></div>
+        <div class="h-speedo">
+          <svg viewBox="0 0 200 200" class="gauge">
+            <path d="M 30 150 A 80 80 0 1 1 170 150" class="track"/>
+            <path d="M 30 150 A 80 80 0 1 1 170 150" class="rpm x-rpm"/>
+          </svg>
+          <div class="spd"><span class="x-speed">0</span><small>KM/H</small></div>
+          <div class="gear">GEAR <b class="x-gear">1</b></div>
+        </div>
+      </div>`;
+      host.appendChild(v);
+      const q = (c) => v.querySelector(c);
+      const el = {
+        view: v, pos: q('.x-pos'), total: q('.x-total'), lap: q('.x-lap'), laps: q('.x-laps'), laptime: q('.x-laptime'), best: q('.x-best'),
+        td: q('.x-td'), boost: q('.x-boost'), mult: q('.mult'), chain: q('.x-chain'), speed: q('.x-speed'), gear: q('.x-gear'),
+        rpm: q('.x-rpm'), banner: q('.h-banner'), popups: q('.popups'), countdown: q('.countdown'), power: q('.h-power'),
+        minimap: q('.minimap'), last: {},
+      };
+      el.chain.style.strokeDasharray = `${this.chainLen}`;
+      this.huds.push(el);
+    }
+    this.rpmLen = this.huds[0].rpm.getTotalLength() || 380;
+    for (const h of this.huds) h.rpm.style.strokeDasharray = `${this.rpmLen}`;
+    return this.huds.map((h) => h.minimap);
   }
 
   show(name) {
@@ -157,7 +208,8 @@ export class UI {
     return el;
   }
 
-  carPanel(car, paints, paintIndex, index = 0, total = 1) {
+  carPanel(car, paints, paintIndex, index = 0, total = 1, who = '') {
+    $('#s-cars .head').innerHTML = who ? `<b>${who}</b> SELECT CAR` : '<b>SELECT</b> CAR';
     $('#carcount').textContent = `${String(index + 1).padStart(2, '0')} / ${String(total).padStart(2, '0')}`;
     const nameEl = $('#carname');
     nameEl.textContent = car.name;
@@ -174,8 +226,10 @@ export class UI {
     $('#paintname').textContent = paints[paintIndex].name.toUpperCase();
   }
 
-  hud(d) {
-    const e = this.el, L = this.last;
+  hud(d, i = 0) {
+    const e = this.huds[i];
+    if (!e) return;
+    const L = e.last;
     const set = (k, el, v) => { if (L[k] !== v) { L[k] = v; el.textContent = v; } };
     set('pos', e.pos, d.position);
     set('total', e.total, d.total);
@@ -187,49 +241,54 @@ export class UI {
     set('speed', e.speed, Math.round(d.speed));
     set('gear', e.gear, d.gear);
     e.boost.style.width = `${(d.boost * 100).toFixed(1)}%`;
-    e.hud.classList.toggle('boosting', d.boosting);
-    e.hud.classList.toggle('crashcam', d.camera);
+    e.view.classList.toggle('boosting', d.boosting);
+    e.view.classList.toggle('crashcam', d.camera);
     const m = `×${d.multiplier}`;
     if (L.mult !== m) { L.mult = m; e.mult.firstElementChild.textContent = m; e.mult.classList.remove('bump'); void e.mult.offsetWidth; e.mult.classList.add('bump'); }
     e.mult.classList.toggle('active', d.multiplier > 1 || d.chain > 0);
     e.chain.style.strokeDashoffset = `${this.chainLen * (1 - d.chain)}`;
     e.rpm.style.strokeDashoffset = `${this.rpmLen * (1 - Math.min(1, d.rpm))}`;
     const pw = d.power || '';
-    if (L.power !== pw) {
+    if (L.power !== pw || L.pkey !== d.powerKey) {
       L.power = pw;
-      const el = $('#h-power');
+      L.pkey = d.powerKey;
+      const el = e.power;
       el.className = `h-power ${pw ? 'show' : ''} p-${pw}`;
       const names = { shockwave: 'SHOCKWAVE', ricochet: 'RICOCHET', strike: 'LIGHTNING STRIKE', oil: 'OIL SLICK' };
       $('.pname', el).textContent = names[pw] || '';
+      $('.pkey', el).textContent = d.powerKey || 'E';
     }
     const banner = d.wrongWay ? 'WRONG WAY' : d.drafting ? 'SLIPSTREAM' : '';
-    if (L.banner !== banner) { L.banner = banner; e.banner.textContent = banner; e.banner.className = banner ? (d.wrongWay ? 'bad show' : 'show') : ''; }
+    if (L.banner !== banner) { L.banner = banner; e.banner.textContent = banner; e.banner.className = `h-banner ${banner ? (d.wrongWay ? 'bad show' : 'show') : ''}`; }
   }
 
-  popup(title, sub = '', kind = '') {
+  popup(title, sub = '', kind = '', i = 0) {
+    const box = (this.huds[i] || this.huds[0]).popups;
     const p = document.createElement('div');
     p.className = `pop ${kind}`;
     p.innerHTML = `<div class="t">${title}</div>${sub ? `<div class="s">${sub}</div>` : ''}`;
-    this.el.popups.prepend(p);
-    while (this.el.popups.children.length > 3) this.el.popups.lastChild.remove();
+    box.prepend(p);
+    while (box.children.length > 3) box.lastChild.remove();
     setTimeout(() => p.classList.add('out'), kind === 'takedown' ? 1900 : 1400);
     setTimeout(() => p.remove(), kind === 'takedown' ? 2400 : 1900);
   }
 
-  clearPopups() { this.el.popups.innerHTML = ''; this.el.countdown.innerHTML = ''; }
+  clearPopups() { for (const h of this.huds) { h.popups.innerHTML = ''; h.countdown.innerHTML = ''; } }
 
   countdown(text) {
-    const c = this.el.countdown;
-    c.innerHTML = `<span class="${text === 'GO!' ? 'go' : ''}">${text}</span>`;
-    if (text === 'GO!') setTimeout(() => { if (c.textContent === 'GO!') c.innerHTML = ''; }, 900);
+    for (const h of this.huds) {
+      const c = h.countdown;
+      c.innerHTML = `<span class="${text === 'GO!' ? 'go' : ''}">${text}</span>`;
+      if (text === 'GO!') setTimeout(() => { if (c.textContent === 'GO!') c.innerHTML = ''; }, 900);
+    }
   }
 
   results(list, headline) {
     $('#r-head').innerHTML = headline;
-    $('#results').innerHTML = `<div class="rrow hdr"><span>POS</span><span>DRIVER</span><span>CAR</span><span>TIME</span><span>BEST LAP</span></div>` +
+    $('#results').innerHTML = `<div class="rrow hdr"><span>POS</span><span>DRIVER</span><span>CAR</span><span>TIME</span><span>BEST LAP</span><span>TAKEDOWNS</span></div>` +
       list.map((r) => `<div class="rrow${r.isPlayer ? ' me' : ''}" style="--c:#${r.paint.toString(16).padStart(6, '0')}">
         <span class="p">${r.pos}</span><span class="n"><i></i>${r.name}</span><span>${r.car}</span>
-        <span>${r.time !== null ? formatTime(r.time) : 'DNF'}</span><span>${formatTime(r.best)}</span></div>`).join('');
+        <span>${r.time !== null ? formatTime(r.time) : '—'}</span><span>${formatTime(r.best)}</span><span>${r.takedowns ?? ''}</span></div>`).join('');
   }
 
   error(msg) {

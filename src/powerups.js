@@ -20,7 +20,7 @@ export const PICKUP_RULES = {
   shotLife: 6, // seconds
   shotHitS: 2.6, // hit box along the track (m)
   shotHitLat: 1.9, // hit box across the track (m)
-  slickLife: 20,
+  slickLife: 3, // seconds before the spill evaporates
   slickHalfS: 2.8,
   slickHalfLat: 3.6,
   slickBehind: 7, // dropped this far behind the player
