@@ -110,10 +110,10 @@ body.menu-cursor #ui .screen.show { pointer-events: auto; }
 
 /* ---------- car select ---------- */
 #s-cars { background: linear-gradient(90deg, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0.4) 35%, rgba(0,0,0,0) 55%); }
-.carpanel { position: absolute; left: 6vw; top: 22vh; width: 40vh; }
+.carpanel { position: absolute; left: 6vw; top: 22vh; width: 52vh; }
 .carnav { display: flex; align-items: center; gap: 2vh; }
 .carnav .arrow { font-size: 3vh; color: var(--hot); opacity: 0.8; }
-.carname { font-size: 10vh; font-style: italic; font-variation-settings: 'wdth' 75, 'wght' 700; line-height: 1; background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; min-width: 30vh; }
+.carname { flex: 1; min-width: 0; font-size: 10vh; font-style: italic; font-variation-settings: 'wdth' 75, 'wght' 700; line-height: 1.05; padding-right: 1.5vh; white-space: nowrap; overflow: hidden; background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
 .carcount { font-size: 1.8vh; letter-spacing: 0.4em; opacity: 0.6; margin-top: 0.4vh; }
 .cardesc { font-size: 2.2vh; opacity: 0.85; margin: 1vh 0 4vh; }
 .stat { display: flex; align-items: center; gap: 2vh; margin-bottom: 1.6vh; font-size: 1.9vh; letter-spacing: 0.2em; }
@@ -190,17 +190,15 @@ body.menu-cursor #ui .screen.show { pointer-events: auto; }
 .mult.bump span { animation: bump 0.35s; }
 @keyframes bump { 40% { transform: scale(1.6); } }
 
-.h-power { position: absolute; left: calc(50% - 44vh); bottom: 4.2vh; width: 14vh; text-align: center; opacity: 0; transform: scale(0.7); transition: all 0.25s cubic-bezier(.2,1.4,.3,1); }
+.h-power { position: absolute; left: calc(50% - 48vh); bottom: 4.2vh; width: 18vh; text-align: center; opacity: 0; transform: scale(0.7); transition: all 0.25s cubic-bezier(.2,1.4,.3,1); }
 .h-power.show { opacity: 1; transform: none; }
 .h-power .pic { width: 7vh; height: 7vh; margin: 0 auto; transform: rotate(45deg); border: 0.4vh solid #fff; box-shadow: 0 0 2.5vh currentColor, inset 0 0 1.5vh currentColor; animation: spin 3s linear infinite; }
 .h-power .pname { font-size: 1.7vh; letter-spacing: 0.12em; margin-top: 1.4vh; font-variation-settings: 'wdth' 75, 'wght' 700; }
 .h-power .pkey { display: inline-block; margin-top: 0.6vh; padding: 0.2vh 1.2vh; background: #fff; color: #000; font-style: normal; font-size: 1.6vh; font-variation-settings: 'wdth' 75, 'wght' 700; animation: blink 0.8s infinite; }
-.h-power .pbar { height: 0.6vh; margin-top: 0.8vh; background: rgba(255,255,255,0.15); display: none; }
-.h-power .pbar i { display: block; height: 100%; background: #ff8a00; }
 .h-power.p-shockwave { color: #19e3ff; } .h-power.p-shockwave .pic { background: radial-gradient(circle, #19e3ff, #064a60); }
-.h-power.p-ram { color: #ff8a00; } .h-power.p-ram .pic { background: radial-gradient(circle, #ffb040, #7a3000); }
+.h-power.p-ricochet { color: #ff8a00; } .h-power.p-ricochet .pic { background: radial-gradient(circle, #ffb040, #7a3000); border-radius: 50%; }
+.h-power.p-oil { color: #b04dff; } .h-power.p-oil .pic { background: radial-gradient(circle, #6a3a9a, #0a0610); border-radius: 40% 60% 55% 45%; }
 .h-power.p-strike { color: #ffd400; } .h-power.p-strike .pic { background: radial-gradient(circle, #fff27a, #6a5000); }
-.h-power.show.p-ram .pbar { display: block; }
 @keyframes spin { to { transform: rotate(405deg); } }
 .pop.power .t { color: #ffd400; filter: drop-shadow(0 0 1.5vh rgba(255, 212, 0, 0.7)); }
 .h-speedo { position: absolute; right: 3vw; bottom: 3vh; width: 28vh; height: 28vh; }

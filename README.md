@@ -11,7 +11,7 @@ Arcade 3D takedown racing in the browser — Burnout-style boost, takedowns and 
 - 6 cars — Viper, Bolt, Raptor, Titan, Phantom, Rogue — 8 cars per race
 - Boost meter filled by drifting, near misses, slipstreaming and takedowns, with an adrenaline chain multiplier up to ×5
 - Takedowns with slow-motion crash cam; rivals can take you out too
-- Road pickups: boost rings that respawn, and power-ups — **Shockwave**, **Battering Ram**, **Lightning Strike**
+- Road pickups: boost rings that respawn, and power-ups — **Shockwave** (wrecks everyone near you), **Ricochet** (a shot that bounces down the road until it hits a rival), **Lightning Strike** (hits the car ahead), **Oil Slick** (drop it behind you — chasers crash)
 - Motion blur, speed lines, bloom, chromatic aberration, synthesized engine sounds and music
 
 ## Controls

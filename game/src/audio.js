@@ -283,6 +283,36 @@ export class AudioEngine {
     this.whoosh(false, 0.45 * vol);
   }
 
+  fire() {
+    if (!this.ctx) return;
+    const ctx = this.ctx, t = ctx.currentTime;
+    const o = ctx.createOscillator(); o.type = 'sawtooth';
+    o.frequency.setValueAtTime(220, t); o.frequency.exponentialRampToValueAtTime(1400, t + 0.18);
+    const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 3000;
+    const g = ctx.createGain();
+    o.connect(f); f.connect(g); g.connect(this.sfx);
+    this.env(g, t, 0.005, 0.25, 0.25);
+    o.start(t); o.stop(t + 0.35);
+    this.whoosh(true, 0.3);
+  }
+
+  ping() {
+    this.blip(1800 + Math.random() * 600, 0.06, 0.12, 'triangle');
+  }
+
+  splat() {
+    if (!this.ctx) return;
+    const ctx = this.ctx, t = ctx.currentTime;
+    const n = this.noise(false);
+    const f = ctx.createBiquadFilter(); f.type = 'lowpass';
+    f.frequency.setValueAtTime(1600, t); f.frequency.exponentialRampToValueAtTime(200, t + 0.4);
+    const g = ctx.createGain();
+    n.connect(f); f.connect(g); g.connect(this.sfx);
+    this.env(g, t, 0.01, 0.45, 0.4);
+    n.start(t, Math.random()); n.stop(t + 0.6);
+    this.blip(140, 0.2, 0.2, 'sine');
+  }
+
   thunder(vol = 1) {
     if (!this.ctx) return;
     const ctx = this.ctx, t = ctx.currentTime;

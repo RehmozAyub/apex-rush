@@ -1,7 +1,33 @@
 // Visuals for road pickups (boost rings, power-up crystals) and power-up effects
-// (shockwave ring, ram shield, lightning bolt).
+// (shockwave ring, ricochet orb, oil slick, lightning bolt).
 import * as THREE from 'three';
 import { radialTexture } from './textures.js';
+
+// Swirled rainbow rings that fade out at the rim - the sheen on spilled oil.
+function oilSheenTexture() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 256;
+  const g = c.getContext('2d');
+  const img = g.createImageData(256, 256);
+  for (let y = 0; y < 256; y++) {
+    for (let x = 0; x < 256; x++) {
+      const dx = x / 128 - 1, dy = y / 128 - 1;
+      const r = Math.hypot(dx, dy);
+      const swirl = r * 9 + Math.sin(dx * 5.3 + dy * 3.1) * 1.4 + Math.sin(dy * 7.7 - dx * 2.2) * 0.8;
+      const band = 0.5 + 0.5 * Math.sin(swirl);
+      const fade = Math.max(0, 1 - r) * (0.35 + 0.65 * band);
+      const o = (y * 256 + x) * 4;
+      img.data[o] = 128 + 127 * Math.sin(swirl);
+      img.data[o + 1] = 128 + 127 * Math.sin(swirl + 2.1);
+      img.data[o + 2] = 128 + 127 * Math.sin(swirl + 4.2);
+      img.data[o + 3] = 255 * fade * fade;
+    }
+  }
+  g.putImageData(img, 0, 0);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
 
 const glowTex = () => radialTexture('rgba(255,255,255,1)', 'rgba(255,255,255,0)');
 
@@ -72,13 +98,65 @@ export class PickupVisuals {
     scene.add(this.bolt);
     this.boltT = -1;
     this.boltGeo = new THREE.BoxGeometry(0.25, 1, 0.25);
-    this.shieldMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0xff8a00).multiplyScalar(1.4), transparent: true, opacity: 0.25, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
-    this.shield = new THREE.Mesh(new THREE.SphereGeometry(1, 24, 16), this.shieldMat);
-    this.shield.scale.set(1.6, 1.0, 3.0);
-    this.shield.visible = false;
+    // ricochet orb
+    this.shotMats = [
+      new THREE.MeshBasicMaterial({ color: new THREE.Color(0xffb040).multiplyScalar(7) }),
+      new THREE.MeshBasicMaterial({ color: new THREE.Color(0xff6a00).multiplyScalar(3), transparent: true, opacity: 0.35, blending: THREE.AdditiveBlending, depthWrite: false }),
+      new THREE.MeshBasicMaterial({ color: new THREE.Color(0xffffff).multiplyScalar(4) }),
+    ];
+    this.shot = new THREE.Group();
+    this.shot.add(new THREE.Mesh(new THREE.IcosahedronGeometry(0.42, 2), this.shotMats[0]));
+    this.shot.add(new THREE.Mesh(new THREE.SphereGeometry(1.0, 20, 14), this.shotMats[1]));
+    this.shotRing = new THREE.Mesh(new THREE.TorusGeometry(0.75, 0.05, 6, 32), this.shotMats[2]);
+    this.shot.add(this.shotRing);
+    this.shot.visible = false;
+    scene.add(this.shot);
+
+    // oil slicks: near-black puddle with a painted rainbow sheen (a glossy material would just
+    // mirror the sky at racing-camera angles)
+    this.oilMat = new THREE.MeshStandardMaterial({ color: 0x040405, roughness: 0.5, metalness: 0, envMapIntensity: 0.2, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
+    this.oilEdgeMat = new THREE.MeshBasicMaterial({ map: oilSheenTexture(), transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 });
+    this.oilGeo = new THREE.CircleGeometry(1, 28).rotateX(-Math.PI / 2);
+    this.slicks = new Map();
   }
 
-  attachShield(root) { root.add(this.shield); this.shield.position.y = 0.7; }
+  showShot(x, y, z, time) {
+    this.shot.visible = true;
+    this.shot.position.set(x, y, z);
+    this.shotRing.rotation.set(time * 9, time * 6, 0);
+    const k = 1 + Math.sin(time * 30) * 0.12;
+    this.shot.scale.setScalar(k);
+  }
+
+  hideShot() { this.shot.visible = false; }
+
+  addSlick(id, x, y, z, heading, halfS, halfLat) {
+    const g = new THREE.Group();
+    // a few overlapping blobs so it reads as a spill, not a disc
+    const blobs = [[0, 0, 1, 1], [0.45, 0.3, 0.55, 0.6], [-0.4, -0.35, 0.6, 0.5], [0.1, -0.55, 0.5, 0.45]];
+    for (const [ox, oz, sx, sz] of blobs) {
+      const m = new THREE.Mesh(this.oilGeo, this.oilMat);
+      m.position.set(ox * halfLat * 0.6, 0.1, oz * halfS * 0.6);
+      m.scale.set(halfLat * sx, 1, halfS * sz);
+      m.receiveShadow = true;
+      g.add(m);
+    }
+    const edge = new THREE.Mesh(this.oilGeo, this.oilEdgeMat);
+    edge.scale.set(halfLat * 1.05, 1, halfS * 1.1);
+    edge.position.y = 0.11;
+    g.add(edge);
+    g.position.set(x, y, z);
+    g.rotation.y = heading;
+    g.scale.setScalar(0.01);
+    g.userData.grow = 0;
+    this.scene.add(g);
+    this.slicks.set(id, g);
+  }
+
+  removeSlick(id) {
+    const g = this.slicks.get(id);
+    if (g) { this.scene.remove(g); this.slicks.delete(id); }
+  }
 
   setActive(it, on) {
     const g = this.nodes.get(it.id);
@@ -113,7 +191,7 @@ export class PickupVisuals {
     this.bolt.visible = true;
   }
 
-  update(dt, time, ramActive) {
+  update(dt, time) {
     for (const g of this.nodes.values()) {
       if (!g.visible) continue;
       const f = g.userData.float;
@@ -138,20 +216,25 @@ export class PickupVisuals {
       this.boltMat.opacity = Math.max(0, 1 - this.boltT / 0.45) * (0.6 + Math.random() * 0.4);
       if (this.boltT > 0.45) { this.boltT = -1; this.bolt.visible = false; }
     }
-    this.shield.visible = ramActive;
-    if (ramActive) this.shieldMat.opacity = 0.18 + Math.sin(time * 14) * 0.07;
+    for (const g of this.slicks.values()) {
+      if (g.userData.grow < 1) {
+        g.userData.grow = Math.min(1, g.userData.grow + dt * 4);
+        g.scale.setScalar(0.3 + 0.7 * (1 - Math.pow(1 - g.userData.grow, 3)));
+      }
+    }
   }
 
   dispose() {
-    this.scene.remove(this.group, this.shock, this.bolt);
-    this.shield.parent?.remove(this.shield);
+    this.scene.remove(this.group, this.shock, this.bolt, this.shot);
+    for (const id of [...this.slicks.keys()]) this.removeSlick(id);
+    this.shot.traverse((o) => { if (o.geometry) o.geometry.dispose(); });
+    this.oilGeo.dispose();
     for (const g of this.geos) g.dispose();
     this.boltGeo.dispose();
-    for (const m of [this.boostMat, this.chevMat, ...this.powerMats, this.cageMat, this.poolMats.boost, this.poolMats.power, this.shockMat, this.boltMat, this.shieldMat]) {
+    for (const m of [this.boostMat, this.chevMat, ...this.powerMats, this.cageMat, this.poolMats.boost, this.poolMats.power, this.shockMat, this.boltMat, ...this.shotMats, this.oilMat, this.oilEdgeMat]) {
       if (m.map) m.map.dispose();
       m.dispose();
     }
     this.shock.geometry.dispose();
-    this.shield.geometry.dispose();
   }
 }

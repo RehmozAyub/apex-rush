@@ -174,4 +174,31 @@ test('strike targets the closest rival ahead within range', () => {
   assert.equal(t.id, 'b');
   assert.equal(strikeTarget(1000, [{ id: 'a', progress: 900, wrecked: false }]), null);
   assert.ok(POWER_IDS.includes(randomPower()));
+  assert.deepEqual(POWER_IDS, ['shockwave', 'ricochet', 'strike', 'oil']);
+});
+
+import { stepShot, inBox } from '../game/src/powerups.js';
+
+test('ricochet shot bounces off the barriers and stays on the road', () => {
+  const hw = 9;
+  const p = { s: 0, lat: 0, vs: 90, vl: 14, t: 0 };
+  let bounces = 0;
+  for (let i = 0; i < 600; i++) {
+    if (stepShot(p, 1 / 120, hw)) bounces++;
+    assert.ok(Math.abs(p.lat) <= hw - 0.8 + 1e-9, `lat ${p.lat}`);
+  }
+  assert.ok(bounces >= 2, `bounces ${bounces}`);
+  assert.ok(Math.abs(p.s - 450) < 1, `s ${p.s}`);
+});
+
+test('ricochet homes toward a target lane', () => {
+  const p = { s: 0, lat: -6, vs: 90, vl: 0, t: 0 };
+  for (let i = 0; i < 60; i++) stepShot(p, 1 / 120, 9, { lat: 5 });
+  assert.ok(p.vl > 0 && p.lat > -6);
+});
+
+test('hit boxes for the shot and oil slick', () => {
+  assert.ok(inBox(1, 2, 1, 2.6, 1.9));
+  assert.ok(!inBox(4, 2, 1, 2.6, 1.9));
+  assert.ok(!inBox(0, 5, 1, 2.6, 1.9));
 });

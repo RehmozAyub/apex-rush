@@ -9,7 +9,7 @@ import { RaceTracker } from './race.js';
 import { BoostSystem, RULES, isNearMiss, isDrafting, classifyImpact, isPushTakedown, isWallCrash } from './burnout.js';
 import { CARS, PAINTS, AI_NAMES, AI_COUNT, LAPS } from './config.js';
 import { wrapAngle } from './trackMath.js';
-import { PickupState, layoutPickups, randomPower, strikeTarget, POWERS, PICKUP_RULES } from './powerups.js';
+import { PickupState, layoutPickups, randomPower, strikeTarget, stepShot, inBox, POWERS, PICKUP_RULES } from './powerups.js';
 import { PickupVisuals } from './pickups.js';
 
 const CIRCLE_R = 1.05;
@@ -82,9 +82,10 @@ export class RaceSession {
     // road pickups
     this.pickState = new PickupState(layoutPickups(L, this.track.halfWidth));
     this.pickVis = new PickupVisuals(world.scene, this.track, this.pickState.items);
-    this.pickVis.attachShield(this.player.model.root);
     this.power = null;
-    this.ramTime = 0;
+    this.shot = null; // active ricochet shot (track space)
+    this.slicks = []; // oil slicks on the road
+    this.slickId = 0;
     this.powerHeld = false;
     this.pendingStrike = null;
 
@@ -205,7 +206,7 @@ export class RaceSession {
 
     if (racing) this.updateRaceEvents(dt);
     if (racing) this.updatePickups(dt, input);
-    this.pickVis.update(dt, this.time, this.ramTime > 0);
+    this.pickVis.update(dt, this.time);
     this.updateFx(dt);
     this.syncModels();
     this.updatePresentation(realDt, dt, input);
@@ -238,7 +239,8 @@ export class RaceSession {
       }
     }
 
-    if (this.ramTime > 0) this.ramTime -= dt;
+    this.updateShot(dt);
+    this.updateSlicks(dt);
     if (this.pendingStrike) {
       this.pendingStrike.t -= dt;
       if (this.pendingStrike.t <= 0) {
@@ -279,12 +281,31 @@ export class RaceSession {
         this.flash = 0.5;
         this.game.rig.addShake(1);
       }
-    } else if (kind === 'ram') {
+    } else if (kind === 'ricochet') {
       this.power = null;
-      this.ramTime = PICKUP_RULES.ramTime;
-      this.popup('BATTERING RAM', 'SMASH THEM!', 'power');
-      game.audio.whoosh(true, 0.4);
-      game.audio.shockwave(0.5);
+      const R = PICKUP_RULES;
+      this.shot = {
+        s: pv.s + 4, lat: pv.lateral,
+        vs: Math.max(R.shotMinSpeed, pv.speed + R.shotSpeed),
+        vl: (Math.random() < 0.5 ? -1 : 1) * (12 + Math.random() * 4),
+        t: 0,
+      };
+      this.popup('RICOCHET', 'FIRED!', 'power');
+      game.audio.fire();
+      game.rig.addShake(0.25);
+    } else if (kind === 'oil') {
+      this.power = null;
+      const R = PICKUP_RULES;
+      const s = this.track.wrapS(pv.s - R.slickBehind);
+      const edge = this.track.halfWidth - R.slickHalfLat * 0.75; // keep the spill on the tarmac
+      const lat = Math.max(-edge, Math.min(edge, pv.lateral));
+      const p = this.track.pointAt(s, lat);
+      const sl = { id: ++this.slickId, s, lat, t: R.slickLife };
+      this.slicks.push(sl);
+      if (this.slicks.length > 3) this.pickVis.removeSlick(this.slicks.shift().id);
+      this.pickVis.addSlick(sl.id, p.x, p.y, p.z, p.heading, R.slickHalfS, R.slickHalfLat);
+      this.popup('OIL SLICK', 'DROPPED BEHIND YOU', 'power');
+      game.audio.splat();
     } else if (kind === 'strike') {
       const pe = this.race.byId.get('player');
       const rivals = this.cars.filter((c) => !c.isPlayer && c.vehicle.ghost <= 0).map((c) => ({ car: c, wrecked: c.vehicle.wrecked, progress: this.race.byId.get(c.id).progress }));
@@ -296,6 +317,67 @@ export class RaceSession {
       game.audio.thunder(1);
       this.flash = Math.max(this.flash, 0.45);
       this.pendingStrike = { car: t.car, t: 0.12 };
+    }
+  }
+
+  // ricochet shot: flies ahead, bounces off the barriers, wrecks the first rival it touches
+  updateShot(dt) {
+    const sh = this.shot;
+    if (!sh) return;
+    const R = PICKUP_RULES, track = this.track;
+    // home in on the nearest rival ahead within 90 m
+    let target = null, best = 90;
+    for (const c of this.cars) {
+      if (c.isPlayer || c.vehicle.wrecked || c.vehicle.ghost > 0) continue;
+      const ds = track.deltaS(sh.s, c.vehicle.s);
+      if (ds > -1 && ds < best) { best = ds; target = { lat: c.vehicle.lateral }; }
+    }
+    const steps = Math.max(1, Math.ceil(dt / (1 / 120)));
+    for (let k = 0; k < steps && this.shot; k++) {
+      if (stepShot(sh, dt / steps, track.halfWidth, target)) {
+        const p = track.pointAt(sh.s, sh.lat);
+        this.fx.sparks(p.x + p.rx * Math.sign(sh.lat) * 0.6, p.y + 0.7, p.z + p.rz * Math.sign(sh.lat) * 0.6, 0, 0, 14, 1);
+        this.game.audio.ping();
+      }
+      for (const c of this.cars) {
+        if (c.isPlayer || c.vehicle.wrecked || c.vehicle.ghost > 0) continue;
+        if (inBox(track.deltaS(sh.s, c.vehicle.s), c.vehicle.lateral, sh.lat, R.shotHitS, R.shotHitLat)) {
+          const p = track.pointAt(sh.s, 0);
+          this.shot = null;
+          this.pickVis.hideShot();
+          this.takedown(c, p.tx, p.tz, 'RICOCHET TAKEDOWN');
+          return;
+        }
+      }
+    }
+    if (sh.t > R.shotLife) {
+      this.shot = null;
+      this.pickVis.hideShot();
+      const p = track.pointAt(sh.s, sh.lat);
+      this.fx.sparks(p.x, p.y + 0.7, p.z, 0, 0, 30, 1.5);
+      return;
+    }
+    const p = track.pointAt(sh.s, sh.lat);
+    this.pickVis.showShot(p.x, p.y + 0.75, p.z, this.time);
+    if (Math.random() < 0.9) this.fx.glow.spawn(p.x, p.y + 0.75, p.z, (Math.random() - 0.5) * 2, Math.random(), (Math.random() - 0.5) * 2, 0.35, 0.7, 6, 2.6, 0.4, { drag: 0.1 });
+  }
+
+  // oil slicks: any rival driving through spins out and crashes
+  updateSlicks(dt) {
+    const R = PICKUP_RULES;
+    for (let i = this.slicks.length - 1; i >= 0; i--) {
+      const sl = this.slicks[i];
+      sl.t -= dt;
+      if (sl.t <= 0) { this.pickVis.removeSlick(sl.id); this.slicks.splice(i, 1); continue; }
+      for (const c of this.cars) {
+        if (c.isPlayer || c.vehicle.wrecked || c.vehicle.ghost > 0 || c.vehicle.speed < 8) continue;
+        if (inBox(this.track.deltaS(sl.s, c.vehicle.s), c.vehicle.lateral, sl.lat, R.slickHalfS, R.slickHalfLat)) {
+          const v = c.vehicle;
+          // spin sideways into the crash
+          v.yawRate += (Math.random() < 0.5 ? -1 : 1) * 6;
+          this.takedown(c, -Math.cos(v.heading), Math.sin(v.heading), 'SLICKED');
+        }
+      }
     }
   }
 
@@ -420,10 +502,6 @@ export class RaceSession {
     }
     other.lastContact = this.time;
     if (other.vehicle.wrecked || this.player.vehicle.wrecked) return;
-    if (this.ramTime > 0) {
-      if (closing > 1.5) this.takedown(other, (ca.isPlayer ? 1 : -1) * nx, (ca.isPlayer ? 1 : -1) * nz, 'RAM TAKEDOWN');
-      return;
-    }
     const kind = classifyImpact({ closing, playerShare: share });
     const dirSign = ca.isPlayer ? 1 : -1; // normal points from ca to cb
     if (kind === 'takedown') this.takedown(other, nx * dirSign, nz * dirSign);
@@ -437,7 +515,7 @@ export class RaceSession {
     if (hit.vn > 3) this.fx.sparks(hit.x, hit.y, hit.z, v.vx, v.vz, Math.min(30, hit.vn * 2), Math.min(2, hit.vn / 12));
     if (c.isPlayer) {
       if (v.wrecked) return;
-      if (this.state === 'racing' && this.ramTime <= 0 && isWallCrash({ speed: hit.speed, angleDeg: hit.angle })) {
+      if (this.state === 'racing' && isWallCrash({ speed: hit.speed, angleDeg: hit.angle })) {
         this.crashPlayer('WRECKED', hit.nx, hit.nz);
       } else if (hit.vn > 4 && this.impactCooldown <= 0) {
         this.game.audio.impact(Math.min(1, hit.vn / 18));
@@ -642,7 +720,6 @@ export class RaceSession {
       wrongWay: this.wrongWayTime > 1.2,
       camera: game.rig.inCrashCam,
       power: this.power,
-      ram: this.ramTime > 0 ? this.ramTime / PICKUP_RULES.ramTime : 0,
     });
     game.minimap.draw(this.cars, this.player);
   }

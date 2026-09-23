@@ -2,8 +2,9 @@
 
 export const POWERS = {
   shockwave: { name: 'SHOCKWAVE', desc: 'Wrecks every rival close to you', color: '#19e3ff' },
-  ram: { name: 'BATTERING RAM', desc: 'Any hit is a takedown', color: '#ff8a00' },
+  ricochet: { name: 'RICOCHET', desc: 'Bouncing shot that hunts down the road', color: '#ff8a00' },
   strike: { name: 'LIGHTNING STRIKE', desc: 'Hits the car ahead', color: '#ffd400' },
+  oil: { name: 'OIL SLICK', desc: 'Drop it behind you - chasers crash', color: '#b04dff' },
 };
 export const POWER_IDS = Object.keys(POWERS);
 
@@ -14,7 +15,15 @@ export const PICKUP_RULES = {
   powerRespawn: 12,
   radius: 2.7, // pickup radius (m)
   shockRadius: 18,
-  ramTime: 6,
+  shotSpeed: 45, // m/s faster than the player (min shotMinSpeed)
+  shotMinSpeed: 80,
+  shotLife: 6, // seconds
+  shotHitS: 2.6, // hit box along the track (m)
+  shotHitLat: 1.9, // hit box across the track (m)
+  slickLife: 20,
+  slickHalfS: 2.8,
+  slickHalfLat: 3.6,
+  slickBehind: 7, // dropped this far behind the player
   strikeRange: 280, // metres of track ahead
 };
 
@@ -81,4 +90,29 @@ export function strikeTarget(playerProgress, rivals, range = PICKUP_RULES.strike
     if (gap > 0 && gap < range && (!best || gap < best.gap)) best = { ...r, gap };
   }
   return best;
+}
+
+// Ricochet shot in track space: {s, lat, vs, vl, t}. Advances it, bouncing off the barriers.
+// Returns true when it bounced this step.
+export function stepShot(p, dt, halfWidth, target = null) {
+  if (target) {
+    // gentle homing toward the next rival ahead
+    p.vl += Math.max(-1, Math.min(1, (target.lat - p.lat) / 4)) * 22 * dt;
+  }
+  p.vl = Math.max(-16, Math.min(16, p.vl));
+  p.s += p.vs * dt;
+  p.lat += p.vl * dt;
+  p.t += dt;
+  const lim = halfWidth - 0.8;
+  if (Math.abs(p.lat) > lim) {
+    p.lat = Math.sign(p.lat) * (2 * lim - Math.abs(p.lat));
+    p.vl = -p.vl;
+    return true;
+  }
+  return false;
+}
+
+// Does a car at (ds along track from the object, lateral) touch a box of the given half sizes?
+export function inBox(ds, lat, objLat, halfS, halfLat) {
+  return Math.abs(ds) < halfS && Math.abs(lat - objLat) < halfLat;
 }
