@@ -68,7 +68,7 @@ export default {
   smoke: [0.86, 0.7, 0.5],
   weather: { type: 'dust', count: 1400, wind: [9, 3], color: 0xd8b080, spray: [0.85, 0.68, 0.46] },
   trackStyle: {
-    road: { base: '#4a423c', line: '#f2c21a', edge: '#e8e2d4', lanes: 2, roughness: 0.9, dust: true },
+    road: { base: '#56504a', line: '#f2c21a', edge: '#e8e2d4', lanes: 2, roughness: 0.92, dust: true, cracks: 2.4, patches: 3, wear: 0.6, aggregate: 1.25, oil: 1, seed: 66 }, // baked and cracked
     kerb: null,
     barrier: { type: 'guardrail', color: 0x9a8f84, postColor: 0x6a5a48 },
     embankment: 0xc89060,

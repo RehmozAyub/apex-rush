@@ -1,6 +1,7 @@
 // Heightfield terrain that blends smoothly down to the road, plus a spatial index of the track
 // for "distance to track" queries used when scattering scenery.
 import * as THREE from 'three';
+import { addWorldDetail } from './detail.js';
 
 // Value noise + fbm (deterministic)
 function hash(x, z) {
@@ -84,7 +85,7 @@ export function buildTerrain({ size, res, center = [0, 0], heightAt, colorAt, ma
     colors[i * 3] = col.r; colors[i * 3 + 1] = col.g; colors[i * 3 + 2] = col.b;
   }
   g.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-  const mat = material || new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0 });
+  const mat = material || addWorldDetail(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0 }), { fine: [0.32, 0.42], macro: [0.012, 0.35], rough: 0.1, triplanar: true });
   const mesh = new THREE.Mesh(g, mat);
   mesh.receiveShadow = true;
   return mesh;
@@ -129,5 +130,5 @@ export function mountainRing({ inner = 1400, outer = 3200, segs = 160, rings = 1
     for (let i = 0; i < ia.length; i += 3) { const t = ia[i + 1]; ia[i + 1] = ia[i + 2]; ia[i + 2] = t; }
     g.computeVertexNormals();
   }
-  return new THREE.Mesh(g, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, flatShading: true }));
+  return new THREE.Mesh(g, addWorldDetail(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, flatShading: true }), { fine: [0.03, 0.35], macro: [0.004, 0.3], rough: 0, triplanar: true }));
 }

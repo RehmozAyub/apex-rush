@@ -7,6 +7,7 @@ import { UI } from './ui.js';
 import { Minimap } from './minimap.js';
 import { CameraRig } from './camera.js';
 import { buildWorld } from './world.js';
+import { getAsphalt, prewarm } from './asphalt.js';
 import { buildCar, disposeCar } from './carModel.js';
 import { RaceSession } from './session.js';
 import { MAPS } from './maps/index.js';
@@ -57,6 +58,8 @@ class Game {
     this.ui.loading(0.1, 'BUILDING SUNSET COAST');
     await nextFrame();
     await this.loadWorld(0, (p, t) => this.ui.loading(0.1 + p * 0.85, t));
+    // generate every other track's asphalt on the worker while the player is in the menus
+    prewarm(MAPS.map((m) => m.trackStyle.road), this.asphaltSize());
     this.ui.loading(1, 'READY');
     await nextFrame();
     this.showTitle();
@@ -74,8 +77,10 @@ class Game {
     if (this.world) this.world.dispose();
     this.world = null;
     progress(0.1, `BUILDING ${MAPS[i].name}`);
+    const asphalt = await getAsphalt(MAPS[i].trackStyle.road, this.asphaltSize());
+    progress(0.4, `BUILDING ${MAPS[i].name}`);
     await nextFrame();
-    const world = buildWorld(MAPS[i], this.renderer.renderer, this.renderer.quality);
+    const world = buildWorld(MAPS[i], this.renderer.renderer, this.renderer.quality, { asphalt });
     progress(0.8, 'COMPILING SHADERS');
     await nextFrame();
     this.world = world;
@@ -89,6 +94,8 @@ class Game {
     this.renderer.renderer.compile(world.scene, this.renderer.camera);
     progress(1, 'READY');
   }
+
+  asphaltSize() { return this.renderer.quality.density >= 0.9 ? 'high' : 'low'; }
 
   buildShowroom() {
     this.removeShowroom();

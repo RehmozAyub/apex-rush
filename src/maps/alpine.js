@@ -54,7 +54,7 @@ export default {
   hemi: { sky: 0xb8d4ff, ground: 0x4a5a3a, intensity: 1.0 },
   smoke: [0.9, 0.9, 0.92],
   trackStyle: {
-    road: { base: '#35363c', line: '#f5c400', edge: '#f2f2f2', lanes: 2, roughness: 0.85, dash: false },
+    road: { base: '#3c3d42', line: '#f5c400', edge: '#f2f2f2', lanes: 2, roughness: 0.86, dash: false, cracks: 1.6, patches: 3, seed: 44 }, // old mountain road
     kerb: null,
     barrier: { type: 'guardrail', color: 0xc8ccd2, glow: [0xff8a00, 0xff8a00], glowIntensity: 1.4 },
     embankment: 0x4f6a36,

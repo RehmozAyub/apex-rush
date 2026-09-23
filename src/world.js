@@ -5,8 +5,9 @@ import { TrackIndex } from './terrain.js';
 import { createSky } from './sky.js';
 import { buildTrackMeshes } from './trackMesh.js';
 import { Weather } from './weather.js';
+import { addWorldDetail } from './detail.js';
 
-export function buildWorld(def, glRenderer, quality) {
+export function buildWorld(def, glRenderer, quality, { asphalt }) {
   const scene = new THREE.Scene();
   const track = new TrackPath(def.layout.points, { width: def.layout.width });
   const index = new TrackIndex(track);
@@ -28,11 +29,20 @@ export function buildWorld(def, glRenderer, quality) {
   const hemi = new THREE.HemisphereLight(def.hemi.sky, def.hemi.ground, def.hemi.intensity);
   scene.add(hemi);
 
-  scene.add(buildTrackMeshes(track, def.trackStyle, glRenderer.capabilities.getMaxAnisotropy()));
+  scene.add(buildTrackMeshes(track, def.trackStyle, glRenderer.capabilities.getMaxAnisotropy(), asphalt));
 
   const envScene = new THREE.Scene();
   envScene.add(createSky(def.sky, 400));
   const scenery = def.build({ scene, track, index, density: quality.density, envScene, sunDir }) || {};
+  // rock-like scenery (flat-shaded vertex-coloured instances: rocks, mesas, ruins) gets stone grain
+  const detailed = new Set();
+  scene.traverse((o) => {
+    const m = o.material;
+    if (o.isInstancedMesh && m && m.isMeshStandardMaterial && m.flatShading && m.vertexColors && !m.onBeforeCompile.toString().includes('uGrain') && !detailed.has(m)) {
+      detailed.add(m);
+      addWorldDetail(m, { fine: [0.9, 0.4], macro: [0.05, 0.25], rough: 0.1, triplanar: true });
+    }
+  });
 
   const pmrem = new THREE.PMREMGenerator(glRenderer);
   const envRT = pmrem.fromScene(envScene, 0.04, 0.1, 1000);

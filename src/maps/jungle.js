@@ -64,7 +64,7 @@ export default {
   headlights: true,
   weather: { type: 'rain', count: 3200, wind: [3, 1], color: 0xa8b8c8, lightning: true, spray: [0.72, 0.76, 0.8] },
   trackStyle: {
-    road: { base: '#26282a', line: '#e0e0d8', edge: '#e0e0d8', lanes: 2, roughness: 0.28, wet: true, envIntensity: 1.2 },
+    road: { base: '#2a2c2e', line: '#e0e0d8', edge: '#e0e0d8', lanes: 2, roughness: 0.45, wet: true, envIntensity: 1.2, cracks: 1.5, patches: 2, seed: 77 }, // rain-soaked
     kerb: ['#e0c020', '#1a1a1a'],
     barrier: { type: 'wall', color: 0x5a5c52, height: 0.9, glow: [0xffd23f, 0xffd23f], glowIntensity: 1.2 },
     embankment: 0x3a4a2a,

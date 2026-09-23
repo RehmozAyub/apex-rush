@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { LAYOUTS } from './layouts.js';
 import { rng, instanced } from '../scenery.js';
+import { addWorldDetail } from '../detail.js';
 import { windowTextures, neonSignTexture, radialTexture } from '../textures.js';
 
 const NEON = [0xff2d95, 0x19e3ff, 0xffd23f, 0x8a3cff, 0x3dff8a, 0xff6a2d];
@@ -45,7 +46,7 @@ export default {
   underglow: true,
   headlights: true,
   trackStyle: {
-    road: { base: '#1c1c22', line: '#d8d8e0', edge: '#e0c040', lanes: 3, roughness: 0.45, metalness: 0.05, wet: true, envIntensity: 0.9 },
+    road: { base: '#222228', line: '#d8d8e0', edge: '#e0c040', lanes: 3, roughness: 0.55, metalness: 0.05, wet: true, envIntensity: 1.15, wear: 1.3, oil: 6, patches: 3, seed: 33 }, // wet, worn city streets
     kerb: null,
     barrier: { type: 'wall', color: 0x5a5c66, height: 1.05, glow: [0xff2d95, 0x19e3ff], glowIntensity: 3 },
     embankment: null,
@@ -57,7 +58,7 @@ export default {
     const rand = rng(7);
     const hw = track.halfWidth;
 
-    const ground = new THREE.Mesh(new THREE.PlaneGeometry(6000, 6000).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0x121218, roughness: 0.55, metalness: 0.3 }));
+    const ground = new THREE.Mesh(new THREE.PlaneGeometry(6000, 6000).rotateX(-Math.PI / 2), addWorldDetail(new THREE.MeshStandardMaterial({ color: 0x121218, roughness: 0.55, metalness: 0.3 }), { fine: [0.5, 0.5], macro: [0.02, 0.4], rough: 0.3 }));
     ground.position.y = -0.08;
     ground.receiveShadow = true;
     scene.add(ground);
