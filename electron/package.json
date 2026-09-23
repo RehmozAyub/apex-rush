@@ -1,0 +1,20 @@
+{
+  "name": "apex-rush",
+  "productName": "ApexRush",
+  "version": "1.0.0",
+  "description": "APEX RUSH - takedown racing",
+  "author": "APEX RUSH",
+  "main": "main.cjs",
+  "build": {
+    "appId": "com.apexrush.game",
+    "productName": "ApexRush",
+    "files": ["main.cjs", "game/**/*"],
+    "asar": true,
+    "directories": { "output": "dist" },
+    "win": {
+      "target": [{ "target": "portable", "arch": ["x64"] }],
+      "icon": "icon.png"
+    },
+    "portable": { "artifactName": "ApexRush.exe" }
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "name": "apex-rush-dev",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/logic.test.js"
+  }
+}
+
