@@ -1,7 +1,6 @@
 // DOM overlay: menus, HUD, popups, countdown, results.
 import { formatTime } from './race.js';
 import { POWERS, POWER_IDS } from './powerups.js';
-import { CAR_BUDGET } from './config.js';
 import { powerIconURL } from './powerIcons.js';
 
 const icon = (id) => `<img class="picon" src="${powerIconURL(id)}" alt="">`;
@@ -72,7 +71,7 @@ export class UI {
             <h2>TAKEDOWNS</h2>
             <p>Slam a rival hard, or shove them into a wall. Hit a wall head-on or get rammed and you crash.</p>
             <h2>DRIVE ASSIST</h2>
-            <p>On by default: let go of the steering and the car follows the road, it slows for tight bends and shrugs off wall hits. Press <b>H</b> in a race (or use the pause menu) to drive fully manual.</p>
+            <p>On by default: you steer, it helps. It nudges you away from the walls, calms over-steering, brakes for bends you'd miss and makes wall hits less punishing. Press <b>H</b> in a race (or use the pause menu) to drive fully manual.</p>
             <h2>POWER-UPS</h2>
             <p class="note">Every block shows what's inside. Drive through one to grab it (a new one replaces the one you hold). Rivals use them too.</p>
             ${POWER_IDS.map((id) => `<p class="pw">${icon(id)}<b style="color:${POWERS[id].color}">${POWERS[id].name}</b> ${POWERS[id].desc.toLowerCase()}</p>`).join('')}
@@ -233,11 +232,8 @@ export class UI {
       nameEl.style.fontSize = `${size}vh`;
     }
     $('#cardesc').textContent = car.desc;
-    // ten-point bars; every car spends the same budget (a couple get one point extra)
-    const extra = car.total - CAR_BUDGET;
-    $('#stats').innerHTML = [['SPEED', car.points.speed], ['ACCEL', car.points.accel], ['HANDLING', car.points.handling], ['STRENGTH', car.points.strength]]
-      .map(([k, v]) => `<div class="stat"><span>${k}</span><div class="sbar pts">${'<i></i>'.repeat(v)}${'<i class="off"></i>'.repeat(10 - v)}</div><em>${v}</em></div>`).join('') +
-      `<div class="stat total"><span>POINTS</span><b>${car.total}</b><small>${extra > 0 ? `+${extra} OVER THE ${CAR_BUDGET} BUDGET` : `BALANCED ${CAR_BUDGET}-POINT BUILD`}</small></div>`;
+    $('#stats').innerHTML = [['SPEED', car.stats.speed], ['ACCEL', car.stats.accel], ['HANDLING', car.stats.handling], ['STRENGTH', car.stats.strength]]
+      .map(([k, v]) => `<div class="stat"><span>${k}</span><div class="sbar"><i style="width:${Math.round(v * 100)}%"></i></div></div>`).join('');
     $('#swatches').innerHTML = paints.map((p, i) => `<i class="${i === paintIndex ? 'sel' : ''}" data-i="${i}" style="background:#${p.hex.toString(16).padStart(6, '0')}"></i>`).join('');
     $('#paintname').textContent = paints[paintIndex].name.toUpperCase();
   }

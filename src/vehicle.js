@@ -165,7 +165,7 @@ export class Vehicle {
     this.vz += nz * out;
     // speed lost once per impact; rubbing along the rail costs very little
     // heavier cars (more STRENGTH) plough through with less speed lost
-    const fr = (fresh ? Math.min(0.35, vn * 0.012) : Math.min(0.01, vn * 0.002)) / this.mass;
+    const fr = (fresh ? Math.min(0.45, vn * 0.022) : Math.min(0.01, vn * 0.002)) / this.mass;
     this.vx *= 1 - fr; this.vz *= 1 - fr;
     if (!this.wrecked) {
       // glance off: turn to run alongside the wall, angled slightly away from it

@@ -137,7 +137,7 @@ export class RaceSession {
   get takedowns() { return this.humans.reduce((a, H) => a + H.takedowns, 0); }
   get shot() { return this.shots.find((s) => s.owner === this.player) || null; }
 
-  setAssist(i, on) { if (this.humans[i]) { this.humans[i].assistOn = on; this.humans[i].assist.lane = null; } }
+  setAssist(i, on) { if (this.humans[i]) this.humans[i].assistOn = on; }
 
   popup(title, sub = '', kind = '', H = this.humans[0]) { this.game.ui.popup(title, sub, kind, H ? H.index : 0); }
   popupAll(title, sub = '', kind = '') { for (const H of this.humans) this.popup(title, sub, kind, H); }
@@ -287,6 +287,11 @@ export class RaceSession {
         this.popup(POWERS[c.power].name, old && old !== c.power ? `REPLACED ${POWERS[old].name}` : `PRESS ${this.powerKey(H)} TO UNLEASH`, 'power', H);
         game.audio.pickup(true);
       } else if (!c.power) {
+        // AI only grabs a block now and then, and leaves it for a human close behind
+        if (!c.blockRoll || c.blockRoll.id !== it.id) {
+          c.blockRoll = { id: it.id, take: Math.random() < AI_POWER.pickChance && !this.humanBehind(c, AI_POWER.leaveForHuman) };
+        }
+        if (!c.blockRoll.take) continue;
         this.pickState.take(it);
         this.pickVis.setActive(it, false);
         c.power = it.power;
@@ -322,6 +327,14 @@ export class RaceSession {
         return d > 0 && d < 90;
       });
     }
+  }
+
+  // is a human within `dist` metres behind car c on the road?
+  humanBehind(c, dist) {
+    return this.humans.some((H) => {
+      const d = this.track.deltaS(c.vehicle.s, H.car.vehicle.s);
+      return d < 0 && d > -dist;
+    });
   }
 
   // AI rivals fire the power-ups they picked up, now and then (see AI_POWER)
@@ -508,6 +521,8 @@ export class RaceSession {
 
   updateRaceEvents(dt) {
     for (const c of this.cars) {
+      // a wreck tumbling down the road doesn't gain places (or cross the line)
+      if (c.vehicle.wrecked) continue;
       const r = this.race.update(c.id, c.vehicle.s, this.time);
       const H = c.human;
       if (!H || !r) continue;
@@ -659,6 +674,7 @@ export class RaceSession {
       // an AI power-up just got this human: AIs leave them alone for a while
       if (byCar && !byCar.human && label !== 'TAKEDOWN!') c.human.shieldUntil = this.time + AI_POWER.humanShield;
     } else {
+      c.crashS = v.s;
       v.crash(dirX, dirZ, 1.3);
       c.respawn = 3.4;
       this.fx.explosion(v.x, v.y + 0.6, v.z, v.vx, v.vz, c.paint, v.y);
@@ -682,6 +698,7 @@ export class RaceSession {
   crashHuman(H, label, dirX, dirZ, byCar = null) {
     const car = H.car, v = car.vehicle;
     if (v.wrecked) return;
+    car.crashS = v.s;
     v.crash(dirX, dirZ, 1);
     car.respawn = 2.4;
     H.boost.resetChain();
@@ -693,10 +710,13 @@ export class RaceSession {
     H.rig.startCrashCam(v, this.split ? 1.2 : 1.8, 1);
   }
 
+  // back on the road where the car crashed (an AI a little further back), not where the wreck
+  // stopped sliding
   respawn(c) {
     const v = c.vehicle;
-    let s = v.s;
+    let s = c.crashS ?? v.s;
     if (!c.human) {
+      s = this.track.wrapS(s - AI_POWER.respawnSetback);
       for (const H of this.humans) {
         const d = this.track.deltaS(H.car.vehicle.s, s);
         if (Math.abs(d) < 30) s = this.track.wrapS(H.car.vehicle.s - 40);
