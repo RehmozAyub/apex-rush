@@ -131,7 +131,7 @@ class Game {
     }
     this.renderer.onView = n > 1 ? (i) => {
       const H = this.session && this.session.humans[i];
-      if (H) this.world.prepareView(H.car.vehicle, this.renderer.cameras[i]);
+      if (H && this.world) this.world.prepareView(H.car.vehicle, this.renderer.cameras[i]);
     } : null;
     this.minimap = this.minimaps[0];
     for (const r of this.rigs) r.fovScale = n > 1 ? 0.62 : 1;
