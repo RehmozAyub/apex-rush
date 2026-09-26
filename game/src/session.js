@@ -287,10 +287,8 @@ export class RaceSession {
         this.popup(POWERS[c.power].name, old && old !== c.power ? `REPLACED ${POWERS[old].name}` : `PRESS ${this.powerKey(H)} TO UNLEASH`, 'power', H);
         game.audio.pickup(true);
       } else if (!c.power) {
-        // AI only grabs a block now and then, and leaves it for a human close behind
-        if (!c.blockRoll || c.blockRoll.id !== it.id) {
-          c.blockRoll = { id: it.id, take: Math.random() < AI_POWER.pickChance && !this.humanBehind(c, AI_POWER.leaveForHuman) };
-        }
+        // an AI grabs a block only some of the time (one roll per block it drives through)
+        if (!c.blockRoll || c.blockRoll.id !== it.id || this.time - c.blockRoll.t > 3) c.blockRoll = { id: it.id, t: this.time, take: Math.random() < AI_POWER.pickChance };
         if (!c.blockRoll.take) continue;
         this.pickState.take(it);
         this.pickVis.setActive(it, false);
@@ -327,14 +325,6 @@ export class RaceSession {
         return d > 0 && d < 90;
       });
     }
-  }
-
-  // is a human within `dist` metres behind car c on the road?
-  humanBehind(c, dist) {
-    return this.humans.some((H) => {
-      const d = this.track.deltaS(c.vehicle.s, H.car.vehicle.s);
-      return d < 0 && d > -dist;
-    });
   }
 
   // AI rivals fire the power-ups they picked up, now and then (see AI_POWER)
