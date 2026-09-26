@@ -2,14 +2,16 @@
 // music sequencer. No audio files.
 
 const midi = (n) => 440 * Math.pow(2, (n - 69) / 12);
+const RACE_CUTOFF = 4200; // music low-pass in races (the menus use 1400)
 
+// Each track: tempo, root note and four 7th chords (semitones from the root), one per bar.
 const SONGS = {
-  coast: { bpm: 108, root: 57, chords: [[0, 3, 7], [-4, 0, 3], [3, 7, 10], [-2, 2, 5]], bright: 0.8 },
-  city: { bpm: 124, root: 54, chords: [[0, 3, 7], [-4, -1, 3], [3, 7, 10], [1, 5, 8]], bright: 1.0 },
-  alpine: { bpm: 116, root: 50, chords: [[0, 4, 7], [7, 11, 14], [9, 12, 16], [5, 9, 12]], bright: 0.9 },
-  snow: { bpm: 112, root: 52, chords: [[0, 3, 7], [8, 12, 15], [3, 7, 10], [10, 14, 17]], bright: 0.7 },
-  canyon: { bpm: 118, root: 55, chords: [[0, 3, 7], [5, 9, 12], [0, 3, 7], [-2, 2, 5]], bright: 0.85 },
-  jungle: { bpm: 128, root: 50, chords: [[0, 3, 7], [-2, 2, 5], [-4, 0, 3], [-5, -1, 2]], bright: 0.75 },
+  coast: { bpm: 100, root: 53, chords: [[0, 4, 7, 11], [-3, 0, 4, 7], [5, 9, 12, 16], [7, 11, 14, 17]], bright: 0.8 }, // F: Imaj7 vi7 IVmaj7 V7
+  city: { bpm: 116, root: 54, chords: [[0, 3, 7, 10], [-4, 0, 3, 7], [3, 7, 10, 14], [-2, 2, 5, 9]], bright: 0.9 }, // F#m: i7 VImaj7 IIImaj7 VII
+  alpine: { bpm: 110, root: 50, chords: [[0, 4, 7, 11], [-5, -1, 2, 6], [-3, 0, 4, 7], [5, 9, 12, 16]], bright: 0.9 }, // D: I V vi IV
+  snow: { bpm: 100, root: 52, chords: [[0, 3, 7, 10], [-4, 0, 3, 7], [5, 8, 12, 15], [-2, 2, 5, 9]], bright: 0.7 }, // Em: i7 VImaj7 iv7 VII
+  canyon: { bpm: 106, root: 55, chords: [[0, 4, 7, 11], [-2, 2, 5, 9], [5, 9, 12, 16], [0, 4, 7, 11]], bright: 0.8 }, // G: I bVII IV I
+  jungle: { bpm: 118, root: 50, chords: [[0, 3, 7, 10], [5, 9, 12, 15], [0, 3, 7, 10], [-2, 2, 5, 9]], bright: 0.75 }, // D dorian: i7 IV7 i7 VII
 };
 
 export class AudioEngine {
@@ -33,9 +35,15 @@ export class AudioEngine {
     this.out.threshold.value = -14;
     this.out.ratio.value = 4;
     this.out.connect(ctx.destination);
+    // take the edge off everything: gentle high-shelf cut before the limiter
+    this.shelf = ctx.createBiquadFilter();
+    this.shelf.type = 'highshelf';
+    this.shelf.frequency.value = 5000;
+    this.shelf.gain.value = -5;
+    this.shelf.connect(this.out);
     this.masterGain = ctx.createGain();
     this.masterGain.gain.value = this.master;
-    this.masterGain.connect(this.out);
+    this.masterGain.connect(this.shelf);
     this.sfx = ctx.createGain();
     this.sfx.connect(this.masterGain);
     this.musicFilter = ctx.createBiquadFilter();
@@ -48,10 +56,23 @@ export class AudioEngine {
     // echo for the arp
     this.delay = ctx.createDelay(1);
     this.delayFb = ctx.createGain();
-    this.delayFb.gain.value = 0.35;
+    this.delayFb.gain.value = 0.3;
     this.delay.connect(this.delayFb);
     this.delayFb.connect(this.delay);
     this.delay.connect(this.musicFilter);
+    // small synthetic room reverb for the pads and lead
+    this.reverb = ctx.createConvolver();
+    const rl = Math.floor(ctx.sampleRate * 2.2);
+    const ir = ctx.createBuffer(2, rl, ctx.sampleRate);
+    for (let ch = 0; ch < 2; ch++) {
+      const d = ir.getChannelData(ch);
+      for (let i = 0; i < rl; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / rl, 3.2);
+    }
+    this.reverb.buffer = ir;
+    this.reverbGain = ctx.createGain();
+    this.reverbGain.gain.value = 0.35;
+    this.reverb.connect(this.reverbGain);
+    this.reverbGain.connect(this.musicFilter);
 
     const len = ctx.sampleRate * 2;
     this.noiseBuf = ctx.createBuffer(1, len, ctx.sampleRate);
@@ -86,21 +107,25 @@ export class AudioEngine {
     e.gain.gain.value = 0;
     e.filter = ctx.createBiquadFilter();
     e.filter.type = 'lowpass';
-    e.filter.Q.value = 3;
+    e.filter.Q.value = 0.9;
+    e.filter2 = ctx.createBiquadFilter();
+    e.filter2.type = 'lowpass';
+    e.filter2.Q.value = 0.5;
     e.shaper = ctx.createWaveShaper();
     const curve = new Float32Array(256);
-    for (let i = 0; i < 256; i++) { const x = i / 128 - 1; curve[i] = Math.tanh(x * 2.5); }
+    for (let i = 0; i < 256; i++) { const x = i / 128 - 1; curve[i] = Math.tanh(x * 1.5); }
     e.shaper.curve = curve;
     e.o1 = ctx.createOscillator(); e.o1.type = 'sawtooth';
-    e.o2 = ctx.createOscillator(); e.o2.type = 'square';
-    e.o3 = ctx.createOscillator(); e.o3.type = 'sawtooth';
-    const g1 = ctx.createGain(); g1.gain.value = 0.5;
-    const g2 = ctx.createGain(); g2.gain.value = 0.35;
-    const g3 = ctx.createGain(); g3.gain.value = 0.25;
+    e.o2 = ctx.createOscillator(); e.o2.type = 'triangle';
+    e.o3 = ctx.createOscillator(); e.o3.type = 'sine';
+    const g1 = ctx.createGain(); g1.gain.value = 0.32;
+    const g2 = ctx.createGain(); g2.gain.value = 0.6;
+    const g3 = ctx.createGain(); g3.gain.value = 0.22;
     e.o1.connect(g1); e.o2.connect(g2); e.o3.connect(g3);
     g1.connect(e.shaper); g2.connect(e.shaper); g3.connect(e.shaper);
     e.shaper.connect(e.filter);
-    e.filter.connect(e.gain);
+    e.filter.connect(e.filter2);
+    e.filter2.connect(e.gain);
     e.gain.connect(this.sfx);
     // turbo / boost whine
     e.whine = ctx.createOscillator(); e.whine.type = 'sine';
@@ -108,12 +133,12 @@ export class AudioEngine {
     e.whine.connect(e.whineGain); e.whineGain.connect(this.sfx);
     // boost hiss
     e.hiss = this.noise();
-    e.hissFilter = ctx.createBiquadFilter(); e.hissFilter.type = 'bandpass'; e.hissFilter.frequency.value = 3000; e.hissFilter.Q.value = 0.8;
+    e.hissFilter = ctx.createBiquadFilter(); e.hissFilter.type = 'bandpass'; e.hissFilter.frequency.value = 1800; e.hissFilter.Q.value = 0.7;
     e.hissGain = ctx.createGain(); e.hissGain.gain.value = 0;
     e.hiss.connect(e.hissFilter); e.hissFilter.connect(e.hissGain); e.hissGain.connect(this.sfx);
     // tyres
     e.tyre = this.noise();
-    e.tyreFilter = ctx.createBiquadFilter(); e.tyreFilter.type = 'bandpass'; e.tyreFilter.frequency.value = 1700; e.tyreFilter.Q.value = 4;
+    e.tyreFilter = ctx.createBiquadFilter(); e.tyreFilter.type = 'bandpass'; e.tyreFilter.frequency.value = 1000; e.tyreFilter.Q.value = 1.4;
     e.tyreGain = ctx.createGain(); e.tyreGain.gain.value = 0;
     e.tyre.connect(e.tyreFilter); e.tyreFilter.connect(e.tyreGain); e.tyreGain.connect(this.sfx);
     // wind
@@ -123,7 +148,7 @@ export class AudioEngine {
     e.wind.connect(e.windFilter); e.windFilter.connect(e.windGain); e.windGain.connect(this.sfx);
     // scrape
     e.scrape = this.noise();
-    e.scrapeFilter = ctx.createBiquadFilter(); e.scrapeFilter.type = 'bandpass'; e.scrapeFilter.frequency.value = 900; e.scrapeFilter.Q.value = 1.5;
+    e.scrapeFilter = ctx.createBiquadFilter(); e.scrapeFilter.type = 'bandpass'; e.scrapeFilter.frequency.value = 600; e.scrapeFilter.Q.value = 0.9;
     e.scrapeGain = ctx.createGain(); e.scrapeGain.gain.value = 0;
     e.scrape.connect(e.scrapeFilter); e.scrapeFilter.connect(e.scrapeGain); e.scrapeGain.connect(this.sfx);
     for (const n of [e.o1, e.o2, e.o3, e.whine, e.hiss, e.tyre, e.wind, e.scrape]) n.start();
@@ -154,18 +179,20 @@ export class AudioEngine {
     const f = (38 + rpm * 125) * pitch;
     e.o1.frequency.setTargetAtTime(f, t, 0.03);
     e.o2.frequency.setTargetAtTime(f * 0.5, t, 0.03);
-    e.o3.frequency.setTargetAtTime(f * 1.505, t, 0.03);
-    e.filter.frequency.setTargetAtTime(350 + throttle * 1500 + rpm * 1600 + boost * 900, t, 0.05);
-    e.gain.gain.setTargetAtTime(active ? (0.1 + throttle * 0.1 + boost * 0.04) * volume : 0, t, 0.08);
-    e.whine.frequency.setTargetAtTime(f * 9 + 400, t, 0.05);
-    e.whineGain.gain.setTargetAtTime(active ? boost * 0.03 + rpm * 0.005 : 0, t, 0.1);
-    e.hissGain.gain.setTargetAtTime(active ? boost * 0.08 : 0, t, 0.08);
-    e.tyreGain.gain.setTargetAtTime(active ? Math.min(0.2, slip * 0.35) : 0, t, 0.05);
-    e.tyreFilter.frequency.setTargetAtTime(1500 + slip * 600, t, 0.05);
+    e.o3.frequency.setTargetAtTime(f * 2, t, 0.03);
+    const cut = 260 + throttle * 700 + rpm * 1000 + boost * 500;
+    e.filter.frequency.setTargetAtTime(cut, t, 0.05);
+    e.filter2.frequency.setTargetAtTime(cut * 1.6, t, 0.05);
+    e.gain.gain.setTargetAtTime(active ? (0.11 + throttle * 0.08 + boost * 0.03) * volume : 0, t, 0.08);
+    e.whine.frequency.setTargetAtTime(f * 5 + 300, t, 0.05);
+    e.whineGain.gain.setTargetAtTime(active ? (boost * 0.014 + rpm * 0.002) * volume : 0, t, 0.1);
+    e.hissGain.gain.setTargetAtTime(active ? boost * 0.045 * volume : 0, t, 0.08);
+    e.tyreGain.gain.setTargetAtTime(active ? Math.min(0.11, slip * 0.2) * volume : 0, t, 0.06);
+    e.tyreFilter.frequency.setTargetAtTime(900 + slip * 350, t, 0.05);
     const w = Math.min(1, speed / 90);
-    e.windGain.gain.setTargetAtTime(active ? w * w * 0.12 : 0, t, 0.1);
-    e.windFilter.frequency.setTargetAtTime(300 + w * 1400, t, 0.1);
-    e.scrapeGain.gain.setTargetAtTime(active ? scraping * 0.25 : 0, t, 0.03);
+    e.windGain.gain.setTargetAtTime(active ? w * w * 0.08 * volume : 0, t, 0.1);
+    e.windFilter.frequency.setTargetAtTime(280 + w * 1000, t, 0.1);
+    e.scrapeGain.gain.setTargetAtTime(active ? scraping * 0.12 * volume : 0, t, 0.03);
   }
 
   silenceEngine() {
@@ -183,10 +210,10 @@ export class AudioEngine {
     if (!this.ctx) return;
     const ctx = this.ctx, t = ctx.currentTime;
     const n = this.noise(false);
-    const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 1200 + power * 2500;
+    const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 900 + power * 1400;
     const g = ctx.createGain();
     n.connect(f); f.connect(g); g.connect(this.sfx);
-    this.env(g, t, 0.003, Math.min(1, 0.25 + power * 0.5), 0.25 + power * 0.3);
+    this.env(g, t, 0.003, Math.min(0.8, 0.2 + power * 0.4), 0.22 + power * 0.25);
     n.start(t); n.stop(t + 1);
     const o = ctx.createOscillator(); o.type = 'sine';
     o.frequency.setValueAtTime(110, t); o.frequency.exponentialRampToValueAtTime(35, t + 0.3);
@@ -196,11 +223,11 @@ export class AudioEngine {
     o.start(t); o.stop(t + 0.5);
     // metallic ring
     for (const fr of [620, 910, 1370]) {
-      const m = ctx.createOscillator(); m.type = 'square';
+      const m = ctx.createOscillator(); m.type = 'triangle';
       m.frequency.value = fr * (0.9 + Math.random() * 0.2);
       const mg = ctx.createGain();
       m.connect(mg); mg.connect(this.sfx);
-      this.env(mg, t, 0.002, 0.02 * power, 0.25);
+      this.env(mg, t, 0.002, 0.012 * power, 0.3);
       m.start(t); m.stop(t + 0.4);
     }
   }
@@ -216,10 +243,10 @@ export class AudioEngine {
     this.env(g, t, 0.01, 0.9, 1.4);
     o.start(t); o.stop(t + 1.6);
     const n = this.noise(false);
-    const f = ctx.createBiquadFilter(); f.type = 'bandpass'; f.frequency.setValueAtTime(3000, t); f.frequency.exponentialRampToValueAtTime(300, t + 1.2);
+    const f = ctx.createBiquadFilter(); f.type = 'bandpass'; f.frequency.setValueAtTime(1800, t); f.frequency.exponentialRampToValueAtTime(250, t + 1.2);
     const ng = ctx.createGain();
     n.connect(f); f.connect(ng); ng.connect(this.sfx);
-    this.env(ng, t, 0.01, 0.4, 1.2);
+    this.env(ng, t, 0.01, 0.3, 1.2);
     n.start(t); n.stop(t + 1.5);
   }
 
@@ -236,7 +263,7 @@ export class AudioEngine {
     n.start(t); n.stop(t + 0.6);
   }
 
-  blip(freq = 880, dur = 0.08, vol = 0.2, type = 'square') {
+  blip(freq = 880, dur = 0.08, vol = 0.2, type = 'triangle') {
     if (!this.ctx) return;
     const ctx = this.ctx, t = ctx.currentTime;
     const o = ctx.createOscillator(); o.type = type; o.frequency.value = freq;
@@ -250,20 +277,20 @@ export class AudioEngine {
     // rising two-note sting for scoring events
     if (!this.ctx) return;
     const base = 660 * Math.pow(2, Math.min(4, level - 1) / 12 * 2);
-    this.blip(base, 0.08, 0.1, 'triangle');
-    setTimeout(() => this.blip(base * 1.5, 0.14, 0.1, 'triangle'), 70);
+    this.blip(base, 0.1, 0.08, 'sine');
+    setTimeout(() => { this.blip(base * 1.5, 0.22, 0.08, 'sine'); this.blip(base * 3, 0.16, 0.015, 'sine'); }, 70);
   }
 
   setSlowmo(k) {
     if (!this.ctx) return;
     const t = this.ctx.currentTime;
-    this.musicFilter.frequency.setTargetAtTime(k > 0.01 ? 500 : this.menuMode ? 1400 : 18000, t, 0.15);
+    this.musicFilter.frequency.setTargetAtTime(k > 0.01 ? 500 : this.menuMode ? 1400 : RACE_CUTOFF, t, 0.15);
   }
 
   setMenuMode(on) {
     this.menuMode = on;
     if (!this.ctx) return;
-    this.musicFilter.frequency.setTargetAtTime(on ? 1400 : 18000, this.ctx.currentTime, 0.4);
+    this.musicFilter.frequency.setTargetAtTime(on ? 1400 : RACE_CUTOFF, this.ctx.currentTime, 0.4);
   }
 
   playMusic(songId) {
@@ -276,7 +303,7 @@ export class AudioEngine {
   pickup(power = false) {
     if (!this.ctx) return;
     const notes = power ? [523, 659, 784, 1047] : [880, 1320];
-    notes.forEach((f, i) => setTimeout(() => this.blip(f, 0.09, 0.12, power ? 'square' : 'triangle'), i * 55));
+    notes.forEach((f, i) => setTimeout(() => this.blip(f, 0.12, 0.09, power ? 'triangle' : 'sine'), i * 55));
   }
 
   shockwave(vol = 1) {
@@ -291,24 +318,24 @@ export class AudioEngine {
     this.whoosh(false, 0.45 * vol);
   }
 
-  fire() {
+  fire(vol = 1) {
     if (!this.ctx) return;
     const ctx = this.ctx, t = ctx.currentTime;
-    const o = ctx.createOscillator(); o.type = 'sawtooth';
-    o.frequency.setValueAtTime(220, t); o.frequency.exponentialRampToValueAtTime(1400, t + 0.18);
-    const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 3000;
+    const o = ctx.createOscillator(); o.type = 'triangle';
+    o.frequency.setValueAtTime(220, t); o.frequency.exponentialRampToValueAtTime(1100, t + 0.18);
+    const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 1800;
     const g = ctx.createGain();
     o.connect(f); f.connect(g); g.connect(this.sfx);
-    this.env(g, t, 0.005, 0.25, 0.25);
+    this.env(g, t, 0.005, 0.25 * vol, 0.25);
     o.start(t); o.stop(t + 0.35);
-    this.whoosh(true, 0.3);
+    this.whoosh(true, 0.3 * vol);
   }
 
-  ping() {
-    this.blip(1800 + Math.random() * 600, 0.06, 0.12, 'triangle');
+  ping(vol = 1) {
+    this.blip(1300 + Math.random() * 400, 0.07, 0.07 * vol, 'sine');
   }
 
-  splat() {
+  splat(vol = 1) {
     if (!this.ctx) return;
     const ctx = this.ctx, t = ctx.currentTime;
     const n = this.noise(false);
@@ -316,9 +343,9 @@ export class AudioEngine {
     f.frequency.setValueAtTime(1600, t); f.frequency.exponentialRampToValueAtTime(200, t + 0.4);
     const g = ctx.createGain();
     n.connect(f); f.connect(g); g.connect(this.sfx);
-    this.env(g, t, 0.01, 0.45, 0.4);
+    this.env(g, t, 0.01, 0.45 * vol, 0.4);
     n.start(t, Math.random()); n.stop(t + 0.6);
-    this.blip(140, 0.2, 0.2, 'sine');
+    this.blip(140, 0.2, 0.2 * vol, 'sine');
   }
 
   thunder(vol = 1) {
@@ -350,11 +377,11 @@ export class AudioEngine {
     const src = this.noise();
     const f = ctx.createBiquadFilter();
     const g = ctx.createGain();
-    if (type === 'rain') { f.type = 'highpass'; f.frequency.value = 900; }
+    if (type === 'rain') { f.type = 'bandpass'; f.frequency.value = 2200; f.Q.value = 0.4; }
     else { f.type = 'bandpass'; f.frequency.value = 420; f.Q.value = 0.6; }
     src.connect(f); f.connect(g); g.connect(this.sfx);
     g.gain.value = 0;
-    g.gain.setTargetAtTime(type === 'rain' ? 0.14 : 0.1, t, 0.8);
+    g.gain.setTargetAtTime(type === 'rain' ? 0.08 : 0.07, t, 0.8);
     if (type === 'wind') {
       const lfo = ctx.createOscillator(); lfo.frequency.value = 0.15;
       const lg = ctx.createGain(); lg.gain.value = 180;
@@ -384,14 +411,15 @@ export class AudioEngine {
     const section = Math.floor(step / 64) % 4; // variation every 4 bars
     if (i % 4 === 0) this.kick(t);
     if (i === 4 || i === 12) this.snare(t);
-    if (i % 2 === 1 || section > 1) this.hat(t, i % 4 === 2 ? 0.05 : 0.03);
-    // bass: driving 8ths with octave jumps
-    if (i % 2 === 0) this.bass(midi(s.root - 12 + chord[0] + (i % 8 === 6 ? 12 : 0)), t, spb * 1.8);
+    if (i % 4 === 2 || (section > 1 && i % 2 === 1)) this.hat(t, i % 4 === 2 ? 0.035 : 0.018);
+    // bass: 8ths, root with a fifth / octave now and then
+    if (i % 2 === 0) this.bass(midi(s.root - 12 + chord[0] + (i === 6 ? 7 : i === 14 ? 12 : 0)), t, spb * 1.7);
     if (i === 0) this.pad(chord.map((n) => midi(s.root + n)), t, spb * 16);
-    if (section !== 0) {
-      const arp = [0, 1, 2, 1, 0, 2, 1, 2];
-      const note = s.root + 12 + chord[arp[i % 8]] + (i >= 8 && section === 3 ? 12 : 0);
-      this.lead(midi(note), t, spb * 0.9);
+    if (section !== 0 && i % 2 === 0) {
+      // gentle arpeggio in 8ths over the chord's four notes
+      const arp = [0, 1, 2, 3, 2, 1, 2, 3];
+      const note = s.root + 12 + chord[arp[(i / 2) % 8]] + (i >= 8 && section === 3 ? 12 : 0);
+      this.lead(midi(note), t, spb * 1.8);
     }
   }
 
@@ -401,57 +429,59 @@ export class AudioEngine {
     o.frequency.setValueAtTime(150, t); o.frequency.exponentialRampToValueAtTime(42, t + 0.12);
     const g = ctx.createGain();
     o.connect(g); g.connect(this.musicFilter);
-    this.env(g, t, 0.002, 0.9, 0.28);
+    this.env(g, t, 0.002, 0.7, 0.26);
     o.start(t); o.stop(t + 0.35);
   }
 
   snare(t) {
     const ctx = this.ctx;
     const n = this.noise(false);
-    const f = ctx.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = 1400;
+    const f = ctx.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 1800; f.Q.value = 0.7;
     const g = ctx.createGain();
-    n.connect(f); f.connect(g); g.connect(this.musicFilter);
-    this.env(g, t, 0.002, 0.35, 0.18);
+    n.connect(f); f.connect(g); g.connect(this.musicFilter); g.connect(this.reverb);
+    this.env(g, t, 0.002, 0.2, 0.16);
     n.start(t, Math.random()); n.stop(t + 0.25);
     const o = ctx.createOscillator(); o.type = 'triangle'; o.frequency.value = 190;
     const og = ctx.createGain();
     o.connect(og); og.connect(this.musicFilter);
-    this.env(og, t, 0.002, 0.25, 0.09);
+    this.env(og, t, 0.002, 0.18, 0.09);
     o.start(t); o.stop(t + 0.15);
   }
 
   hat(t, vol) {
     const ctx = this.ctx;
     const n = this.noise(false);
-    const f = ctx.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = 7500;
+    const f = ctx.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 8000; f.Q.value = 0.8;
     const g = ctx.createGain();
     n.connect(f); f.connect(g); g.connect(this.musicFilter);
-    this.env(g, t, 0.001, vol * 2.5, 0.04);
+    this.env(g, t, 0.001, vol * 2, 0.035);
     n.start(t, Math.random()); n.stop(t + 0.08);
   }
 
   bass(freq, t, dur) {
     const ctx = this.ctx;
     const o = ctx.createOscillator(); o.type = 'sawtooth'; o.frequency.value = freq;
-    const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.Q.value = 6;
-    f.frequency.setValueAtTime(1400 * this.song.bright, t); f.frequency.exponentialRampToValueAtTime(180, t + dur);
+    const sub = ctx.createOscillator(); sub.type = 'sine'; sub.frequency.value = freq;
+    const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.Q.value = 1.2;
+    f.frequency.setValueAtTime(700 * this.song.bright, t); f.frequency.exponentialRampToValueAtTime(160, t + dur);
     const g = ctx.createGain();
-    o.connect(f); f.connect(g); g.connect(this.musicFilter);
-    this.env(g, t, 0.004, 0.28, dur);
+    o.connect(f); sub.connect(f); f.connect(g); g.connect(this.musicFilter);
+    this.env(g, t, 0.006, 0.24, dur);
+    sub.start(t); sub.stop(t + dur + 0.05);
     o.start(t); o.stop(t + dur + 0.05);
   }
 
   pad(freqs, t, dur) {
     const ctx = this.ctx;
-    const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 1600 * this.song.bright;
+    const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 1100 * this.song.bright;
     const g = ctx.createGain();
     g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(0.06, t + dur * 0.3);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    f.connect(g); g.connect(this.musicFilter);
+    g.gain.exponentialRampToValueAtTime(0.04, t + dur * 0.3);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur * 1.05);
+    f.connect(g); g.connect(this.musicFilter); g.connect(this.reverb);
     for (const fr of freqs) {
-      for (const det of [-9, 9]) {
-        const o = ctx.createOscillator(); o.type = 'sawtooth'; o.frequency.value = fr; o.detune.value = det;
+      for (const det of [-7, 7]) {
+        const o = ctx.createOscillator(); o.type = det < 0 ? 'sawtooth' : 'triangle'; o.frequency.value = fr; o.detune.value = det;
         o.connect(f);
         o.start(t); o.stop(t + dur + 0.05);
       }
@@ -460,12 +490,17 @@ export class AudioEngine {
 
   lead(freq, t, dur) {
     const ctx = this.ctx;
-    const o = ctx.createOscillator(); o.type = 'square'; o.frequency.value = freq;
-    const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 2600 * this.song.bright;
+    // soft pluck: triangle plus a quiet sine an octave up, into echo and reverb
+    const o = ctx.createOscillator(); o.type = 'triangle'; o.frequency.value = freq;
+    const o2 = ctx.createOscillator(); o2.type = 'sine'; o2.frequency.value = freq * 2;
+    const g2 = ctx.createGain(); g2.gain.value = 0.3;
+    const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 2000 * this.song.bright;
     const g = ctx.createGain();
-    o.connect(f); f.connect(g); g.connect(this.musicFilter); g.connect(this.delay);
+    o.connect(f); o2.connect(g2); g2.connect(f); f.connect(g);
+    g.connect(this.musicFilter); g.connect(this.delay); g.connect(this.reverb);
     this.delay.delayTime.value = (60 / this.song.bpm) * 0.75;
-    this.env(g, t, 0.004, 0.05, dur);
+    this.env(g, t, 0.008, 0.07, dur);
+    o2.start(t); o2.stop(t + dur + 0.05);
     o.start(t); o.stop(t + dur + 0.05);
   }
 }

@@ -1,37 +1,36 @@
 // Car specs, paint colours, quality presets.
 
-export const CARS = [
-  {
-    id: 'viper', name: 'VIPER', desc: 'Wedge supercar. Explosive launch.',
-    style: 'wedge', topSpeed: 80, accel: 19, grip: 7.5, turn: 2.35, mass: 1.0,
-    stats: { speed: 0.78, accel: 0.95, handling: 0.72 },
-  },
-  {
-    id: 'bolt', name: 'BOLT', desc: 'Chrome-trimmed grand tourer. Stable at speed.',
-    style: 'gt', topSpeed: 88, accel: 15.5, grip: 6.8, turn: 2.1, mass: 1.25,
-    stats: { speed: 0.9, accel: 0.7, handling: 0.58 },
-  },
-  {
-    id: 'raptor', name: 'RAPTOR', desc: 'Compact hot hatch. Razor handling.',
-    style: 'hatch', topSpeed: 75, accel: 17.5, grip: 9.2, turn: 2.75, mass: 0.85,
-    stats: { speed: 0.64, accel: 0.83, handling: 0.97 },
-  },
-  {
-    id: 'titan', name: 'TITAN', desc: 'Muscle brute. Wins every shoving match.',
-    style: 'muscle', topSpeed: 84, accel: 18.5, grip: 6.6, turn: 2.05, mass: 1.5,
-    stats: { speed: 0.84, accel: 0.9, handling: 0.5 },
-  },
-  {
-    id: 'phantom', name: 'PHANTOM', desc: 'Hypercar. Blistering top end, light on its feet.',
-    style: 'hyper', topSpeed: 92, accel: 17, grip: 7.2, turn: 2.2, mass: 0.95,
-    stats: { speed: 1.0, accel: 0.82, handling: 0.66 },
-  },
-  {
-    id: 'rogue', name: 'ROGUE', desc: 'Lifted rally hatch. Loves to slide.',
-    style: 'rally', topSpeed: 78, accel: 17.5, grip: 8.6, turn: 2.65, mass: 1.1,
-    stats: { speed: 0.7, accel: 0.85, handling: 0.9 },
-  },
+// Car balance: every car spends a points budget (1-10 per trait) on SPEED, ACCEL, HANDLING and
+// STRENGTH (weight in collisions). The physics numbers are derived from the points, so equal
+// points means an equally quick car. Most cars sit on the base budget; a couple have one point more.
+export const CAR_BUDGET = 24;
+export function carPhysics({ speed, accel, handling, strength }) {
+  return {
+    topSpeed: 72 + speed * 1.6, // m/s
+    accel: 7.4 + accel * 1.6,
+    grip: 4.8 + handling * 0.52,
+    turn: 1.52 + handling * 0.145,
+    mass: 0.62 + strength * 0.1,
+  };
+}
+
+const CAR_DEFS = [
+  { id: 'viper', name: 'VIPER', desc: 'Wedge supercar. Explosive launch.', style: 'wedge', points: { speed: 6, accel: 9, handling: 6, strength: 3 } },
+  { id: 'bolt', name: 'BOLT', desc: 'Chrome-trimmed grand tourer. Stable at speed.', style: 'gt', points: { speed: 8, accel: 5, handling: 6, strength: 5 } },
+  { id: 'raptor', name: 'RAPTOR', desc: 'Compact hot hatch. Razor handling.', style: 'hatch', points: { speed: 5, accel: 7, handling: 9, strength: 3 } },
+  { id: 'titan', name: 'TITAN', desc: 'Muscle brute. Wins every shoving match.', style: 'muscle', points: { speed: 7, accel: 6, handling: 5, strength: 7 } },
+  { id: 'phantom', name: 'PHANTOM', desc: 'Hypercar. Blistering top end, light on its feet.', style: 'hyper', points: { speed: 9, accel: 7, handling: 6, strength: 3 } },
+  { id: 'rogue', name: 'ROGUE', desc: 'Lifted rally hatch. Loves to slide.', style: 'rally', points: { speed: 6, accel: 7, handling: 7, strength: 4 } },
 ];
+
+export const CARS = CAR_DEFS.map((d) => {
+  const p = d.points;
+  return {
+    ...d, ...carPhysics(p),
+    total: p.speed + p.accel + p.handling + p.strength,
+    stats: { speed: p.speed / 10, accel: p.accel / 10, handling: p.handling / 10, strength: p.strength / 10 },
+  };
+});
 
 export const PAINTS = [
   { name: 'Inferno', hex: 0xd4101e },
@@ -59,7 +58,7 @@ export const BOOST_SPEED = 1.32;
 export const BOOST_ACCEL = 1.7;
 
 export function loadSettings() {
-  const def = { quality: 'high', motionBlur: true, master: 0.8, music: 0.55, bestLaps: {} };
+  const def = { quality: 'high', motionBlur: true, master: 0.8, music: 0.55, assist: true, assist2: true, bestLaps: {} };
   try {
     const s = JSON.parse(localStorage.getItem('apexrush.settings') || '{}');
     return { ...def, ...s, bestLaps: { ...(s.bestLaps || {}) } };

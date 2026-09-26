@@ -22,7 +22,8 @@ const nextFrame = () => new Promise((r) => setTimeout(r, 20));
 class Game {
   constructor() {
     this.settings = loadSettings();
-    this.sel = { track: 0, car: 0, paint: 0 };
+    this.sel = { track: 0, car: 0, paint: 0 }; // track === MAPS.length means RANDOM
+    this.raceTrack = 0; // the track actually raced (resolved from a RANDOM pick)
     this.sel2 = { car: 4, paint: 4 }; // player 2's pick in split screen
     this.players = 1;
     this.carPick = 0; // whose car is being chosen (2-player mode)
@@ -139,11 +140,22 @@ class Game {
   pickSel() { return this.carPick === 1 ? this.sel2 : this.sel; }
 
   // --- screens ------------------------------------------------------------------
+  // the map on screen (menus) - RANDOM keeps whatever is loaded
+  shownMap() { return this.world ? this.world.def : MAPS[0]; }
+
+  randomPick() { return this.sel.track === MAPS.length; }
+
+  // choose a random track, never the one just raced
+  rollTrack() {
+    const pool = MAPS.map((m, i) => i).filter((i) => i !== this.raceTrack);
+    return pool[Math.floor(Math.random() * pool.length)];
+  }
+
   showTitle() {
     this.state = 'title';
     this.ui.show('title');
     this.renderTitle();
-    this.audio.playMusic(MAPS[this.sel.track].id);
+    this.audio.playMusic(this.shownMap().id);
     this.audio.setMenuMode(true);
   }
 
@@ -176,14 +188,33 @@ class Game {
   settingsItems() {
     const s = this.settings;
     const bar = (v) => '■'.repeat(Math.round(v * 10)) + '□'.repeat(10 - Math.round(v * 10));
+    const onOff = (v) => (v ? 'ON' : 'OFF');
     return [
-      { label: 'GRAPHICS', value: QUALITY[s.quality].label },
-      { label: 'MOTION BLUR', value: s.motionBlur ? 'ON' : 'OFF' },
-      { label: 'MASTER VOLUME', value: bar(s.master) },
-      { label: 'MUSIC VOLUME', value: bar(s.music) },
-      { label: 'FULLSCREEN', value: document.fullscreenElement ? 'ON' : 'OFF' },
-      { label: 'BACK' },
+      { key: 'assist', label: 'DRIVE ASSIST', value: onOff(s.assist) },
+      { key: 'assist2', label: 'DRIVE ASSIST · PLAYER 2', value: onOff(s.assist2) },
+      { key: 'quality', label: 'GRAPHICS', value: QUALITY[s.quality].label },
+      { key: 'motionBlur', label: 'MOTION BLUR', value: onOff(s.motionBlur) },
+      { key: 'master', label: 'MASTER VOLUME', value: bar(s.master) },
+      { key: 'music', label: 'MUSIC VOLUME', value: bar(s.music) },
+      { key: 'fullscreen', label: 'FULLSCREEN', value: onOff(document.fullscreenElement) },
+      { key: 'back', label: 'BACK' },
     ];
+  }
+
+  assistOn(i) { return i === 0 ? this.settings.assist : this.settings.assist2; }
+
+  setAssist(i, on) {
+    this.settings[i === 0 ? 'assist' : 'assist2'] = on;
+    saveSettings(this.settings);
+    if (this.session) this.session.setAssist(i, on);
+  }
+
+  // in-race toggle (H / [ / gamepad Back)
+  toggleAssist(i) {
+    const on = !this.assistOn(i);
+    this.setAssist(i, on);
+    this.ui.popup(on ? 'DRIVE ASSIST ON' : 'DRIVE ASSIST OFF', on ? 'STEERING + BRAKING HELP' : 'FULL MANUAL CONTROL', '', i);
+    this.audio.blip(on ? 900 : 500, 0.06, 0.1);
   }
 
   showSettings(from) {
@@ -198,16 +229,18 @@ class Game {
 
   changeSetting(i, dir) {
     const s = this.settings;
-    if (i === 0) {
+    const key = this.settingsItems()[i].key;
+    if (key === 'assist' || key === 'assist2') this.setAssist(key === 'assist' ? 0 : 1, !s[key]);
+    else if (key === 'quality') {
       const k = QUALITY_ORDER.indexOf(s.quality);
       s.quality = QUALITY_ORDER[(k + dir + 3) % 3];
       this.applyQuality(s.quality);
-    } else if (i === 1) {
+    } else if (key === 'motionBlur') {
       s.motionBlur = !s.motionBlur;
       this.renderer.motionBlur = s.motionBlur;
-    } else if (i === 2) s.master = Math.max(0, Math.min(1, Math.round((s.master + dir * 0.1) * 10) / 10));
-    else if (i === 3) s.music = Math.max(0, Math.min(1, Math.round((s.music + dir * 0.1) * 10) / 10));
-    else if (i === 4) this.toggleFullscreen();
+    } else if (key === 'master') s.master = Math.max(0, Math.min(1, Math.round((s.master + dir * 0.1) * 10) / 10));
+    else if (key === 'music') s.music = Math.max(0, Math.min(1, Math.round((s.music + dir * 0.1) * 10) / 10));
+    else if (key === 'fullscreen') this.toggleFullscreen();
     this.audio.setVolumes(s.master, s.music);
     saveSettings(s);
     this.renderSettings();
@@ -234,17 +267,29 @@ class Game {
     else this.showTitle();
   }
 
-  pauseItems() { return [{ label: 'RESUME' }, { label: 'RESTART' }, { label: 'SETTINGS' }, { label: 'QUIT TO MENU' }]; }
+  pauseItems() {
+    const onOff = (v) => (v ? 'ON' : 'OFF');
+    const items = [{ key: 'resume', label: 'RESUME' }];
+    if (this.players > 1) {
+      items.push({ key: 'assist0', label: 'P1 DRIVE ASSIST', value: onOff(this.assistOn(0)) });
+      items.push({ key: 'assist1', label: 'P2 DRIVE ASSIST', value: onOff(this.assistOn(1)) });
+    } else items.push({ key: 'assist0', label: 'DRIVE ASSIST', value: onOff(this.assistOn(0)) });
+    items.push({ key: 'restart', label: 'RESTART' }, { key: 'settings', label: 'SETTINGS' }, { key: 'quit', label: 'QUIT TO MENU' });
+    return items;
+  }
   renderPause() { this.ui.menu('m-pause', this.pauseItems(), this.menuIndex.pause); }
 
   resultsItems() { return [{ label: 'RACE AGAIN' }, { label: 'NEXT TRACK' }, { label: 'MAIN MENU' }]; }
   renderResults() { this.ui.menu('m-results', this.resultsItems(), this.menuIndex.results); }
 
   // --- race ---------------------------------------------------------------------
-  async startRace() {
+  // reroll: pick the track again (a RANDOM pick rolls a new one); false = same track again
+  async startRace(reroll = true) {
+    if (reroll) this.raceTrack = this.randomPick() ? this.rollTrack() : this.sel.track;
     this.ui.fade(true);
     await new Promise((r) => setTimeout(r, 350));
-    await this.loadWorld(this.sel.track);
+    this.state = 'loading'; // nothing touches the old session / world while the next one loads
+    await this.loadWorld(this.raceTrack);
     this.endSession();
     this.removeShowroom();
     this.carPick = 0;
@@ -256,9 +301,10 @@ class Game {
     this.state = 'race';
     this.ui.show('hud');
     this.audio.setMenuMode(false);
-    this.audio.playMusic(MAPS[this.sel.track].id);
+    this.audio.playMusic(MAPS[this.raceTrack].id);
     this.slowTime = 0; this.autoDrops = 0;
     this.session.update(0.001);
+    if (this.randomPick()) this.session.popupAll(MAPS[this.raceTrack].name, 'RANDOM TRACK', 'hot');
     this.renderer.renderer.compile(this.world.scene, this.renderer.camera);
     this.ui.fade(false);
   }
@@ -284,7 +330,7 @@ class Game {
 
   showResults(list) {
     const me = list.find((r) => r.isPlayer);
-    const key = MAPS[this.sel.track].id;
+    const key = MAPS[this.raceTrack].id;
     const e = this.session.race.byId.get('player');
     let record = '';
     if (e.bestLap && (!this.settings.bestLaps[key] || e.bestLap < this.settings.bestLaps[key])) {
@@ -318,8 +364,12 @@ class Game {
       if (a === 'confirm') this.titleSelect(this.menuIndex.title);
     } else if (st === 'tracks') {
       if (a === 'left' || a === 'right' || a === 'up' || a === 'down') {
-        const d = a === 'left' ? -1 : a === 'right' ? 1 : a === 'up' ? -3 : 3;
-        this.sel.track = (this.sel.track + d + MAPS.length) % MAPS.length;
+        // six cards in a 3x2 grid, then the RANDOM bar underneath (index MAPS.length)
+        const n = MAPS.length, t = this.sel.track;
+        if (a === 'left' || a === 'right') this.sel.track = (t + (a === 'left' ? -1 : 1) + n + 1) % (n + 1);
+        else if (t === n) this.sel.track = a === 'up' ? n - 2 : 1;
+        else if (a === 'down') this.sel.track = t + 3 < n ? t + 3 : n;
+        else this.sel.track = t - 3 >= 0 ? t - 3 : n;
         this.ui.trackCards(MAPS, this.sel.track, this.trackLengths);
         this.audio.blip(600, 0.03, 0.06);
         this.previewTrack();
@@ -342,15 +392,18 @@ class Game {
       if (a === 'back') this.closeSettings();
     } else if (st === 'race') {
       if (a === 'pause' || a === 'back') { this.state = 'pause'; this.menuIndex.pause = 0; this.ui.show('pause'); this.renderPause(); this.audio.silenceEngine(); }
-      if (a === 'camera' || a === 'reset') {
+      if (a === 'camera' || a === 'reset' || a === 'assist') {
         // whose key was it? (split screen: P1 and P2 have their own camera / reset keys and pads)
         const i = this.players > 1 ? (code.startsWith('pad') ? Number(code.slice(3)) : keyPlayer(a, code)) : 0;
         if (i >= this.players) return;
         if (a === 'camera') this.ui.popup(this.rigs[i].cycle() + ' CAM', '', '', i);
+        else if (a === 'assist') this.toggleAssist(i);
         else this.session.resetPlayer(i);
       }
     } else if (st === 'pause') {
-      if (a === 'up' || a === 'down') { move('pause', 4, a === 'up' ? -1 : 1); this.renderPause(); }
+      const items = this.pauseItems();
+      if (a === 'up' || a === 'down') { move('pause', items.length, a === 'up' ? -1 : 1); this.renderPause(); }
+      if ((a === 'left' || a === 'right') && items[this.menuIndex.pause].key.startsWith('assist')) this.pauseSelect(this.menuIndex.pause);
       if (a === 'confirm' && code !== 'Space') this.pauseSelect(this.menuIndex.pause);
       if (a === 'back' || a === 'pause') this.pauseSelect(0);
     } else if (st === 'results') {
@@ -375,20 +428,30 @@ class Game {
   }
 
   pauseSelect(i) {
-    if (i === 0) { this.state = 'race'; this.ui.show('hud'); }
-    else if (i === 1) this.startRace();
-    else if (i === 2) this.showSettings('pause');
+    const key = this.pauseItems()[i].key;
+    if (key === 'resume') { this.state = 'race'; this.ui.show('hud'); }
+    else if (key.startsWith('assist')) {
+      const p = Number(key.slice(6));
+      this.setAssist(p, !this.assistOn(p));
+      this.audio.blip(700, 0.04, 0.08);
+      this.renderPause();
+    } else if (key === 'restart') this.startRace(false);
+    else if (key === 'settings') this.showSettings('pause');
     else this.quitToMenu();
   }
 
   resultsSelect(i) {
-    if (i === 0) this.startRace();
-    else if (i === 1) { this.sel.track = (this.sel.track + 1) % MAPS.length; this.startRace(); }
-    else this.quitToMenu();
+    if (i === 0) this.startRace(false);
+    else if (i === 1) {
+      // NEXT TRACK: the next card, or another random track when RANDOM was picked
+      if (!this.randomPick()) this.sel.track = (this.raceTrack + 1) % MAPS.length;
+      this.startRace(true);
+    } else this.quitToMenu();
   }
 
   previewTrack() {
     clearTimeout(this.previewTimer);
+    if (this.randomPick()) return; // RANDOM: keep the current scenery, the pick happens at the start
     this.previewTimer = setTimeout(async () => {
       if (this.state !== 'tracks' && this.state !== 'cars') return;
       this.ui.fade(true);

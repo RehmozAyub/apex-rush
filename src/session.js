@@ -10,8 +10,12 @@ import { RaceTracker } from './race.js';
 import { BoostSystem, RULES, isNearMiss, isDrafting, classifyImpact, isPushTakedown, isWallCrash } from './burnout.js';
 import { CARS, PAINTS, AI_NAMES, AI_COUNT, LAPS } from './config.js';
 import { wrapAngle } from './trackMath.js';
-import { PickupState, layoutPickups, randomPower, strikeTarget, stepShot, inBox, POWERS, PICKUP_RULES } from './powerups.js';
+import { PickupState, layoutPickups, strikeTarget, stepShot, inBox, aiWantsPower, POWERS, PICKUP_RULES, AI_POWER } from './powerups.js';
 import { PickupVisuals } from './pickups.js';
+import { DriveAssist, ASSIST_RULES } from './assist.js';
+
+// what a human sees when a power-up (or a rival) wrecks them
+const VICTIM_LABEL = { 'TAKEDOWN!': 'TAKEN OUT', 'RICOCHET TAKEDOWN': 'RICOCHETED', SHOCKWAVE: 'SHOCKWAVED' };
 
 const CIRCLE_R = 1.05;
 const CIRCLE_OFF = 1.2;
@@ -37,6 +41,7 @@ export class RaceSession {
     this.finishTimer = 0;
     this.firstFinishAt = null;
     this.impactCooldown = 0;
+    this.aiPowerCooldown = 6; // AI rivals hold fire for the first seconds
     this.tmpV = new THREE.Vector3();
 
     // grid: 8 cars; one player starts mid-pack, two players share a row
@@ -73,13 +78,15 @@ export class RaceSession {
         isPlayer, vehicle: v, model, spec, paint, human: null,
         ai: isPlayer ? null : new AIDriver(v, this.track, { lane: lat * 0.6, skill: aiSkill[ai % aiSkill.length], aggression: aiAggro[ai % aiAggro.length], refTopSpeed: refTop }),
         controls: { steer: 0, throttle: 0, brake: 0, handbrake: false, boost: false },
+        power: null, powerTime: 0,
         pushedAt: -99, pushedBy: null, lastContact: -99, prevFwd: [0, 0], respawn: 0, mul: 1,
       };
       if (isPlayer) {
         const H = {
-          index: hi, car, boost: new BoostSystem(), power: null, powerHeld: false, drafting: false,
+          index: hi, car, boost: new BoostSystem(), powerHeld: false, drafting: false,
           wrongWayTime: 0, takedowns: 0, boostVis: 0, flash: 0, wasBoosting: false, finished: false,
-          rig: game.rigs[hi], input: null,
+          rig: game.rigs[hi], input: null, incoming: false, shieldUntil: -99,
+          assist: new DriveAssist(this.track), assistOn: game.assistOn(hi),
         };
         car.human = H;
         this.humans[hi] = H;
@@ -125,10 +132,12 @@ export class RaceSession {
   // --- single-player compatibility accessors (debug hooks and tests) ---------------------
   get playerVehicle() { return this.player.vehicle; }
   get boost() { return this.humans[0].boost; }
-  get power() { return this.humans[0].power; }
-  set power(v) { this.humans[0].power = v; }
+  get power() { return this.player.power; }
+  set power(v) { this.player.power = v; }
   get takedowns() { return this.humans.reduce((a, H) => a + H.takedowns, 0); }
-  get shot() { return this.shots.find((s) => s.owner === this.humans[0]) || null; }
+  get shot() { return this.shots.find((s) => s.owner === this.player) || null; }
+
+  setAssist(i, on) { if (this.humans[i]) { this.humans[i].assistOn = on; this.humans[i].assist.lane = null; } }
 
   popup(title, sub = '', kind = '', H = this.humans[0]) { this.game.ui.popup(title, sub, kind, H ? H.index : 0); }
   popupAll(title, sub = '', kind = '') { for (const H of this.humans) this.popup(title, sub, kind, H); }
@@ -211,7 +220,8 @@ export class RaceSession {
       }
       const H = c.human;
       if (H && this.state === 'racing' && !H.finished && !this.autopilot) {
-        c.controls = { ...H.input, boost: H.boost.boosting, draft: H.drafting };
+        const ctl = H.assistOn ? H.assist.apply(v, H.input) : H.input;
+        c.controls = { ...ctl, boost: H.boost.boosting, draft: H.drafting };
         c.mul = 1;
       } else {
         if (!c.ai) c.ai = new AIDriver(v, this.track, { lane: v.lateral, skill: 0.8, aggression: 0 });
@@ -268,12 +278,19 @@ export class RaceSession {
           this.popup('BOOST PICKUP', `+${Math.round(gained)} BOOST`, 'good', H);
           game.audio.pickup(false);
         } else if (c.ai) c.ai.boostFuel = Math.min(100, c.ai.boostFuel + PICKUP_RULES.aiBoostFuel);
-      } else if (H && !H.power) {
+      } else if (H) {
+        // a new block always replaces the power-up you hold
         this.pickState.take(it);
         this.pickVis.setActive(it, false);
-        H.power = randomPower();
-        this.popup(POWERS[H.power].name, `PRESS ${this.powerKey(H)} TO UNLEASH`, 'power', H);
+        const old = c.power;
+        c.power = it.power;
+        this.popup(POWERS[c.power].name, old && old !== c.power ? `REPLACED ${POWERS[old].name}` : `PRESS ${this.powerKey(H)} TO UNLEASH`, 'power', H);
         game.audio.pickup(true);
+      } else if (!c.power) {
+        this.pickState.take(it);
+        this.pickVis.setActive(it, false);
+        c.power = it.power;
+        c.powerTime = 0;
       }
     }
 
@@ -292,8 +309,60 @@ export class RaceSession {
     for (const H of this.humans) {
       const pressed = H.input.power && !H.powerHeld;
       H.powerHeld = !!H.input.power;
-      if (pressed && H.power && this.state === 'racing' && !H.finished && !H.car.vehicle.wrecked) this.usePower(H);
+      if (pressed && H.car.power && this.state === 'racing' && !H.finished && !H.car.vehicle.wrecked) this.usePower(H.car);
     }
+    if (this.state === 'racing') this.updateAIPowers(dt);
+
+    // warn humans about a ricochet coming up behind them
+    for (const H of this.humans) {
+      const hv = H.car.vehicle;
+      H.incoming = !hv.wrecked && this.shots.some((sh) => {
+        if (sh.owner === H.car) return false;
+        const d = this.track.deltaS(sh.s, hv.s);
+        return d > 0 && d < 90;
+      });
+    }
+  }
+
+  // AI rivals fire the power-ups they picked up, now and then (see AI_POWER)
+  updateAIPowers(dt) {
+    const R = AI_POWER;
+    this.aiPowerCooldown -= dt;
+    for (const c of this.cars) {
+      if (c.human || !c.power) continue;
+      c.powerTime += dt;
+      const v = c.vehicle;
+      if (this.aiPowerCooldown > 0 || c.powerTime < R.minHold || v.wrecked || v.ghost > 0) continue;
+      if (Math.random() > dt * R.useRate) continue;
+      if (!aiWantsPower(c.power, this.aiPowerContext(c))) continue;
+      this.usePower(c);
+      this.aiPowerCooldown = R.cooldown * (0.8 + Math.random() * 0.5);
+    }
+  }
+
+  aiPowerContext(me) {
+    const v = me.vehicle, track = this.track;
+    const myProg = this.race.byId.get(me.id).progress;
+    const ctx = { held: me.powerTime, near: [], ahead: [], behind: [], myLat: v.lateral, strike: null };
+    const rivals = [];
+    for (const c of this.cars) {
+      if (c === me || c.vehicle.wrecked || c.vehicle.ghost > 0) continue;
+      const o = c.vehicle;
+      const shielded = !!c.human && this.time < c.human.shieldUntil;
+      const d = track.deltaS(v.s, o.s); // + = ahead on the road
+      const info = { gap: Math.abs(d), lat: o.lateral, shielded, dist: Math.hypot(o.x - v.x, o.z - v.z) };
+      ctx.near.push(info);
+      (d > 0 ? ctx.ahead : ctx.behind).push(info);
+      rivals.push({ car: c, shielded, wrecked: false, progress: this.race.byId.get(c.id).progress });
+    }
+    ctx.ahead.sort((a, b) => a.gap - b.gap);
+    ctx.strike = strikeTarget(myProg, rivals);
+    return ctx;
+  }
+
+  // how loud an event at position p is for the humans (1 close by, 0 far away)
+  audibility(p) {
+    return Math.max(0, Math.min(1, 1.15 - Math.sqrt(this.nearestHuman(p).d2) / 220));
   }
 
   powerKey(H) {
@@ -301,25 +370,28 @@ export class RaceSession {
     return this.split && H.index === 1 ? 'ENTER' : 'E';
   }
 
-  usePower(H = this.humans[0]) {
+  // Fire car `me`'s power-up (human or AI).
+  usePower(me = this.player) {
     const game = this.game;
-    const pv = H.car.vehicle;
-    const kind = H.power;
-    const others = this.cars.filter((c) => c !== H.car);
+    const H = me.human;
+    const pv = me.vehicle;
+    const kind = me.power;
+    const vol = H ? 1 : this.audibility(pv);
+    const others = this.cars.filter((c) => c !== me);
     if (kind === 'shockwave') {
-      H.power = null;
+      me.power = null;
       this.pickVis.shockwave(pv.x, pv.y, pv.z);
       this.fx.sparks(pv.x, pv.y + 0.6, pv.z, pv.vx, pv.vz, 50, 2);
-      game.audio.shockwave();
-      H.rig.addShake(0.9);
-      H.flash = Math.max(H.flash, 0.3);
+      if (vol > 0.02) game.audio.shockwave(vol);
+      if (H) { H.rig.addShake(0.9); H.flash = Math.max(H.flash, 0.3); }
       let hits = 0;
       for (const c of others) {
         if (c.vehicle.wrecked || c.vehicle.ghost > 0) continue;
         const dx = c.vehicle.x - pv.x, dz = c.vehicle.z - pv.z;
         const d = Math.hypot(dx, dz);
-        if (d < PICKUP_RULES.shockRadius) { this.takedown(c, dx / (d || 1), dz / (d || 1), 'SHOCKWAVE', true, H); hits++; }
+        if (d < PICKUP_RULES.shockRadius) { this.takedown(c, dx / (d || 1), dz / (d || 1), 'SHOCKWAVE', true, me); hits++; }
       }
+      if (!H) return;
       if (!hits) this.popup('SHOCKWAVE', 'NO ONE IN RANGE', '', H);
       else {
         this.popup(hits > 1 ? `SHOCKWAVE ×${hits}` : 'SHOCKWAVE', `${hits} TAKEDOWN${hits > 1 ? 'S' : ''}`, 'takedown', H);
@@ -328,41 +400,40 @@ export class RaceSession {
         H.rig.addShake(1);
       }
     } else if (kind === 'ricochet') {
-      H.power = null;
+      me.power = null;
       const R = PICKUP_RULES;
       this.shots.push({
-        owner: H, s: pv.s + 4, lat: pv.lateral,
+        owner: me, s: pv.s + 4, lat: pv.lateral,
         vs: Math.max(R.shotMinSpeed, pv.speed + R.shotSpeed),
         vl: (Math.random() < 0.5 ? -1 : 1) * (12 + Math.random() * 4),
         t: 0,
         vis: this.pickVis.addShot(),
       });
-      this.popup('RICOCHET', 'FIRED!', 'power', H);
-      game.audio.fire();
-      H.rig.addShake(0.25);
+      if (vol > 0.02) game.audio.fire(vol);
+      if (H) { this.popup('RICOCHET', 'FIRED!', 'power', H); H.rig.addShake(0.25); }
     } else if (kind === 'oil') {
-      H.power = null;
+      me.power = null;
       const R = PICKUP_RULES;
       const s = this.track.wrapS(pv.s - R.slickBehind);
       const edge = this.track.halfWidth - R.slickHalfLat * 0.75; // keep the spill on the tarmac
       const lat = Math.max(-edge, Math.min(edge, pv.lateral));
       const p = this.track.pointAt(s, lat);
-      const sl = { owner: H, id: ++this.slickId, s, lat, t: R.slickLife };
+      const sl = { owner: me, id: ++this.slickId, s, lat, t: R.slickLife };
       this.slicks.push(sl);
       this.pickVis.addSlick(sl.id, p.x, p.y, p.z, p.heading, R.slickHalfS, R.slickHalfLat);
-      this.popup('OIL SLICK', 'DROPPED BEHIND YOU', 'power', H);
-      game.audio.splat();
+      if (vol > 0.02) game.audio.splat(vol);
+      if (H) this.popup('OIL SLICK', 'DROPPED BEHIND YOU', 'power', H);
     } else if (kind === 'strike') {
-      const pe = this.race.byId.get(H.car.id);
+      const pe = this.race.byId.get(me.id);
       const rivals = others.filter((c) => c.vehicle.ghost <= 0).map((c) => ({ car: c, wrecked: c.vehicle.wrecked, progress: this.race.byId.get(c.id).progress }));
       const t = strikeTarget(pe.progress, rivals);
-      if (!t) { this.popup('LIGHTNING STRIKE', 'NO TARGET AHEAD', '', H); return; }
-      H.power = null;
+      if (!t) { if (H) this.popup('LIGHTNING STRIKE', 'NO TARGET AHEAD', '', H); return; }
+      me.power = null;
       const v = t.car.vehicle;
       this.pickVis.lightning(new THREE.Vector3(v.x + 6, v.y + 70, v.z - 4), new THREE.Vector3(v.x, v.y + 0.8, v.z));
-      game.audio.thunder(1);
-      H.flash = Math.max(H.flash, 0.45);
-      this.pendingStrikes.push({ car: t.car, owner: H, t: 0.12 });
+      game.audio.thunder(t.car.human ? 1 : Math.max(vol, this.audibility(v)));
+      if (H) H.flash = Math.max(H.flash, 0.45);
+      this.pendingStrikes.push({ car: t.car, owner: me, t: 0.12 });
     }
   }
 
@@ -371,7 +442,7 @@ export class RaceSession {
     const R = PICKUP_RULES, track = this.track;
     for (let i = this.shots.length - 1; i >= 0; i--) {
       const sh = this.shots[i];
-      const valid = (c) => c !== sh.owner.car && !c.vehicle.wrecked && c.vehicle.ghost <= 0;
+      const valid = (c) => c !== sh.owner && !c.vehicle.wrecked && c.vehicle.ghost <= 0;
       let target = null, best = 90;
       for (const c of this.cars) {
         if (!valid(c)) continue;
@@ -384,7 +455,8 @@ export class RaceSession {
         if (stepShot(sh, dt / steps, track.halfWidth, target)) {
           const p = track.pointAt(sh.s, sh.lat);
           this.fx.sparks(p.x + p.rx * Math.sign(sh.lat) * 0.6, p.y + 0.7, p.z + p.rz * Math.sign(sh.lat) * 0.6, 0, 0, 14, 1);
-          this.game.audio.ping();
+          const vol = this.audibility(p);
+          if (vol > 0.05) this.game.audio.ping(vol);
         }
         for (const c of this.cars) {
           if (valid(c) && inBox(track.deltaS(sh.s, c.vehicle.s), c.vehicle.lateral, sh.lat, R.shotHitS, R.shotHitLat)) { hitCar = c; break; }
@@ -412,7 +484,7 @@ export class RaceSession {
       sl.t -= dt;
       if (sl.t <= 0) { this.pickVis.removeSlick(sl.id); this.slicks.splice(i, 1); continue; }
       for (const c of this.cars) {
-        if (c === sl.owner.car || c.vehicle.wrecked || c.vehicle.ghost > 0 || c.vehicle.speed < 8) continue;
+        if (c === sl.owner || c.vehicle.wrecked || c.vehicle.ghost > 0 || c.vehicle.speed < 8) continue;
         if (inBox(this.track.deltaS(sl.s, c.vehicle.s), c.vehicle.lateral, sl.lat, R.slickHalfS, R.slickHalfLat)) {
           const v = c.vehicle;
           v.yawRate += (Math.random() < 0.5 ? -1 : 1) * 6;
@@ -548,11 +620,11 @@ export class RaceSession {
     const dir = aAttacks ? 1 : -1; // normal points from ca to cb
     if (attacker.human) {
       const kind = classifyImpact({ closing, playerShare: share });
-      if (kind === 'takedown') this.takedown(victim, nx * dir, nz * dir, 'TAKEDOWN!', false, attacker.human);
-      else if (kind === 'push') { victim.pushedAt = this.time; victim.pushedBy = attacker.human; }
+      if (kind === 'takedown') this.takedown(victim, nx * dir, nz * dir, 'TAKEDOWN!', false, attacker);
+      else if (kind === 'push') { victim.pushedAt = this.time; victim.pushedBy = attacker; }
     } else {
       // an AI rammed a human: 'playerWrecked' when the AI supplied almost all the closing speed
-      const kind = classifyImpact({ closing, playerShare: 1 - share });
+      const kind = classifyImpact({ closing, playerShare: 1 - share }, victim.human.assistOn ? ASSIST_RULES : RULES);
       if (kind === 'playerWrecked') this.crashHuman(victim.human, 'TAKEN OUT', nx * dir, nz * dir, attacker);
     }
   }
@@ -564,7 +636,7 @@ export class RaceSession {
     if (v.wrecked || this.state !== 'racing') return;
     const H = c.human;
     if (H) {
-      if (!H.finished && isWallCrash({ speed: hit.speed, angleDeg: hit.angle })) {
+      if (!H.finished && isWallCrash({ speed: hit.speed, angleDeg: hit.angle }, H.assistOn ? ASSIST_RULES : RULES)) {
         this.crashHuman(H, 'WRECKED', hit.nx, hit.nz);
       } else if (hit.vn > 4 && this.impactCooldown <= 0) {
         this.game.audio.impact(Math.min(1, hit.vn / 18));
@@ -573,17 +645,20 @@ export class RaceSession {
         this.impactCooldown = 0.15;
       }
     }
-    if (c.pushedBy && c.pushedBy.car !== c && isPushTakedown({ sincePush: this.time - c.pushedAt, wallSpeed: hit.vn })) {
+    if (c.pushedBy && c.pushedBy !== c && isPushTakedown({ sincePush: this.time - c.pushedAt, wallSpeed: hit.vn })) {
       this.takedown(c, hit.nx, hit.nz, 'TAKEDOWN!', false, c.pushedBy);
     }
   }
 
-  // Wreck car `c` and credit human `by` with the takedown.
-  takedown(c, dirX, dirZ, label = 'TAKEDOWN!', quiet = false, by = this.humans[0]) {
+  // Wreck car `c`; car `byCar` caused it (a human gets the takedown credited).
+  takedown(c, dirX, dirZ, label = 'TAKEDOWN!', quiet = false, byCar = this.player) {
     const v = c.vehicle;
     if (v.wrecked) return;
-    if (c.human) this.crashHuman(c.human, label === 'TAKEDOWN!' ? 'TAKEN OUT' : label, dirX, dirZ, by ? by.car : null);
-    else {
+    if (c.human) {
+      this.crashHuman(c.human, VICTIM_LABEL[label] || label, dirX, dirZ, byCar);
+      // an AI power-up just got this human: AIs leave them alone for a while
+      if (byCar && !byCar.human && label !== 'TAKEDOWN!') c.human.shieldUntil = this.time + AI_POWER.humanShield;
+    } else {
       v.crash(dirX, dirZ, 1.3);
       c.respawn = 3.4;
       this.fx.explosion(v.x, v.y + 0.6, v.z, v.vx, v.vz, c.paint, v.y);
@@ -591,7 +666,8 @@ export class RaceSession {
     }
     c.pushedAt = -99;
     c.pushedBy = null;
-    if (!by || by.car === c) return;
+    const by = byCar && byCar !== c ? byCar.human : null;
+    if (!by) return;
     by.takedowns++;
     const gained = by.boost.event(RULES.takedownGain);
     if (quiet) return;
@@ -771,8 +847,10 @@ export class RaceSession {
         drafting: H.drafting && !H.boost.boosting,
         wrongWay: H.wrongWayTime > 1.2,
         camera: H.rig.inCrashCam,
-        power: H.power,
+        power: H.car.power,
         powerKey: this.powerKey(H),
+        assist: H.assistOn,
+        incoming: H.incoming,
       }, H.index);
       game.minimaps[H.index].draw(this.cars, H.car);
     }
