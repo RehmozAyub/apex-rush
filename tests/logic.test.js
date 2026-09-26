@@ -157,9 +157,9 @@ test('pickups are taken and respawn after their timer', () => {
   assert.equal(it.kind, 'boost');
   st.take(it);
   assert.equal(st.near(1, 1), null);
-  st.update(PICKUP_RULES.boostRespawn - 0.1);
+  st.update(PICKUP_RULES.respawnMin - 0.1);
   assert.equal(st.near(1, 1), null);
-  const back = st.update(0.2);
+  const back = st.update(PICKUP_RULES.respawnMax - PICKUP_RULES.respawnMin + 0.2);
   assert.equal(back.length, 1);
   assert.equal(st.near(1, 1).kind, 'boost');
 });
@@ -243,7 +243,7 @@ test('power-up blocks come in pairs showing two different powers, re-rolled on r
   const st = new PickupState(powers.slice(0, 2));
   for (let k = 0; k < 30; k++) {
     st.take(st.items[0]);
-    st.update(PICKUP_RULES.powerRespawn + 0.1, rand);
+    st.update(PICKUP_RULES.respawnMax + 0.1, rand);
     assert.notEqual(st.items[0].power, st.items[1].power);
   }
 });
@@ -263,25 +263,57 @@ test('AI only fires power-ups that will likely hit, and spares shielded players'
   assert.ok(AI_POWER.cooldown >= 5 && AI_POWER.humanShield >= 8);
 });
 
-test('drive assist: holding only the throttle completes a lap without a wall crash', () => {
-  for (const id of ['city', 'canyon']) {
+// A sloppy keyboard driver: late, all-or-nothing steering toward a wandering line.
+function sloppyLap(t, car, assist, seed) {
+  let r = seed;
+  const rnd = () => ((r = (r * 16807) % 2147483647) / 2147483647);
+  const v = new Vehicle(car);
+  v.placeOnTrack(t, 0, 0, 0);
+  const a = new DriveAssist(t), pt = {};
+  let dist = 0, last = v.s, time = 0, hits = 0, crashes = 0, steer = 0, next = 0;
+  while (dist < t.length && time < 150) {
+    if (time >= next) {
+      next = time + 0.1 + rnd() * 0.12;
+      const p = t.pointAt(v.s + 10 + v.speed * 0.45, (rnd() - 0.5) * 6, pt);
+      const err = Math.atan2(Math.sin(Math.atan2(p.x - v.x, p.z - v.z) - v.heading), Math.cos(Math.atan2(p.x - v.x, p.z - v.z) - v.heading));
+      steer = Math.abs(err) < 0.07 ? 0 : -Math.sign(err);
+    }
+    let c = { steer, throttle: 1, brake: 0, handbrake: false, boost: true };
+    if (assist) c = a.apply(v, c);
+    v.update(1 / 120, c, 1);
+    const h = v.constrain(t);
+    if (h && h.vn > 3) hits++;
+    if (h && isWallCrash({ speed: h.speed, angleDeg: h.angle }, assist ? ASSIST_RULES : RULES)) crashes++;
+    dist += t.deltaS(last, v.s); last = v.s; time += 1 / 120;
+  }
+  return { time, hits, crashes };
+}
+
+test('drive assist helps a sloppy driver but does not steer for you', () => {
+  let raw = 0, helped = 0, crashes = 0;
+  for (const id of ['city', 'canyon', 'alpine']) {
     const lay = LAYOUTS[id];
     const t = new TrackPath(lay.points, { width: lay.width });
     for (const car of [CARS[1], CARS[4]]) {
+      raw += sloppyLap(t, car, false, 5).hits;
+      const h = sloppyLap(t, car, true, 5);
+      helped += h.hits;
+      crashes += h.crashes;
+      // hands off the wheel the car is not driven round the track
       const v = new Vehicle(car);
       v.placeOnTrack(t, 0, 0, 0);
       const a = new DriveAssist(t);
-      let dist = 0, last = v.s, time = 0;
-      while (dist < t.length && time < 120) {
-        const c = a.apply(v, { steer: 0, throttle: 1, brake: 0, handbrake: false, boost: true });
-        v.update(1 / 120, c, 1);
-        const h = v.constrain(t);
-        assert.ok(!(h && isWallCrash({ speed: h.speed, angleDeg: h.angle }, ASSIST_RULES)), `${id} ${car.name} crashed`);
-        dist += t.deltaS(last, v.s); last = v.s; time += 1 / 120;
+      let hits = 0;
+      for (let i = 0; i < 120 * 30; i++) {
+        v.update(1 / 120, a.apply(v, { steer: 0, throttle: 1, brake: 0, handbrake: false, boost: false }), 1);
+        const w = v.constrain(t);
+        if (w && w.vn > 3) hits++;
       }
-      assert.ok(dist >= t.length, `${id} ${car.name} only got ${dist.toFixed(0)} m`);
+      assert.ok(hits >= 3, `${id} ${car.name}: hands-off car only touched the wall ${hits} times`);
     }
   }
+  assert.equal(crashes, 0);
+  assert.ok(helped < raw * 0.85, `wall hits with assist ${helped} vs without ${raw}`);
 });
 
 test('a car steering away from the rail gets free quickly and keeps its speed', () => {

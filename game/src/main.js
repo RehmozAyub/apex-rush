@@ -213,7 +213,7 @@ class Game {
   toggleAssist(i) {
     const on = !this.assistOn(i);
     this.setAssist(i, on);
-    this.ui.popup(on ? 'DRIVE ASSIST ON' : 'DRIVE ASSIST OFF', on ? 'STEERING + BRAKING HELP' : 'FULL MANUAL CONTROL', '', i);
+    this.ui.popup(on ? 'DRIVE ASSIST ON' : 'DRIVE ASSIST OFF', on ? 'WALL + CORNER HELP' : 'FULL MANUAL CONTROL', '', i);
     this.audio.blip(on ? 900 : 500, 0.06, 0.1);
   }
 

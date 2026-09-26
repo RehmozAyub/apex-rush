@@ -8,13 +8,13 @@ Arcade 3D takedown racing in the browser — Burnout-style boost, takedowns and 
 ## Features
 
 - 6 tracks with their own weather: Sunset Coast, Neon City, Alpine Pass, Whiteout Summit (snowfall), Scorched Canyon (dust storm), Monsoon Jungle (thunderstorm)
-- 6 cars — Viper, Bolt, Raptor, Titan, Phantom, Rogue — each with its own livery, built on a shared points budget (speed / accel / handling / strength) so every pick is competitive; 8 cars per race
+- 6 cars — Viper, Bolt, Raptor, Titan, Phantom, Rogue — each with its own livery and balanced so every pick is competitive; 8 cars per race
 - 6 tracks, or **Random Track** to let the game pick
-- **Drive Assist** (on by default, per player): hands-off steering follows the road, it slows for tight bends and shrugs off wall hits — toggle it any time with H, [ or the gamepad Back button, or from the pause menu
+- **Drive Assist** (on by default, per player): you still steer — it nudges you off the walls, calms over-steering, brakes for bends you would miss and makes wall hits less punishing — toggle it any time with H, [ or the gamepad Back button, or from the pause menu
 - **2-player split screen** on one keyboard (or two gamepads) — take each other out too
 - Boost meter filled by drifting, near misses, slipstreaming and takedowns, with an adrenaline chain multiplier up to ×5
 - Takedowns with slow-motion crash cam; rivals can take you out too
-- Road pickups: boost rings that respawn, and power-up blocks that show what they hold (grabbing a new one replaces yours; AI rivals use them too) — **Shockwave** (wrecks everyone near you), **Ricochet** (a shot that bounces down the road until it hits a rival), **Lightning Strike** (hits the car ahead), **Oil Slick** (drop it behind you — chasers crash)
+- Road pickups: boost rings that respawn, and power-up blocks that show what they hold (grabbing a new one replaces yours; AI rivals use them now and then; pickups come back after 1–2 s) — **Shockwave** (wrecks everyone near you), **Ricochet** (a shot that bounces down the road until it hits a rival), **Lightning Strike** (hits the car ahead), **Oil Slick** (drop it behind you — chasers crash)
 - Motion blur, speed lines, bloom, chromatic aberration, synthesized engine sounds and music
 
 ## Controls
