@@ -5,7 +5,7 @@ import os
 import sys
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'game')
-PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 5173
+PORT = int(sys.argv[1]) if len(sys.argv) > 1 else int(os.environ.get('PORT', 5173))
 
 
 class NoCache(http.server.SimpleHTTPRequestHandler):

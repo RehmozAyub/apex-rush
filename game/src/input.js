@@ -4,12 +4,12 @@
 export const PLAYER_KEYS = [
   {
     throttle: ['KeyW'], brake: ['KeyS'], left: ['KeyA'], right: ['KeyD'],
-    handbrake: ['Space'], boost: ['ShiftLeft'], power: ['KeyE', 'KeyF'], camera: ['KeyC'], reset: ['KeyR'],
+    handbrake: ['Space'], boost: ['ShiftLeft'], power: ['KeyE', 'KeyF'], camera: ['KeyC'], reset: ['KeyR'], assist: ['KeyH'],
   },
   {
     throttle: ['ArrowUp'], brake: ['ArrowDown'], left: ['ArrowLeft'], right: ['ArrowRight'],
     handbrake: ['ControlRight', 'Numpad0', 'Slash'], boost: ['ShiftRight'], power: ['Enter', 'NumpadEnter', 'Period'],
-    camera: ['Backslash'], reset: ['BracketRight'],
+    camera: ['Backslash'], reset: ['BracketRight'], assist: ['BracketLeft'],
   },
 ];
 const ALL_KEYS = {};
@@ -46,6 +46,7 @@ export class Input {
       if (MENU_KEYS[e.code]) this.emit(MENU_KEYS[e.code], e.code);
       if (ALL_KEYS.camera.includes(e.code)) this.emit('camera', e.code);
       if (ALL_KEYS.reset.includes(e.code)) this.emit('reset', e.code);
+      if (ALL_KEYS.assist.includes(e.code)) this.emit('assist', e.code);
       if (e.code === 'KeyP') this.emit('pause', e.code);
       if (e.code === 'F11') this.emit('fullscreen', e.code);
       if (!e.ctrlKey && !e.altKey) e.preventDefault();
@@ -87,7 +88,7 @@ export class Input {
     const ax = p.axes[0] || 0, ay = p.axes[1] || 0;
     const state = {
       up: b(12) || ay < -0.6, down: b(13) || ay > 0.6, left: b(14) || ax < -0.6, right: b(15) || ax > 0.6,
-      confirm: b(0), back: b(1), pause: b(9), camera: b(3),
+      confirm: b(0), back: b(1), pause: b(9), camera: b(3), assist: b(8),
     };
     for (const [k, v] of Object.entries(state)) {
       if (v && !this.padPrev[i][k]) {

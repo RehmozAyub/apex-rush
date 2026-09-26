@@ -223,3 +223,92 @@ test('asphalt generation is deterministic per seed', () => {
   assert.deepEqual(a.albedo, b.albedo);
   assert.notDeepEqual(a.albedo, c.albedo);
 });
+
+import { aiWantsPower, AI_POWER } from '../game/src/powerups.js';
+import { DriveAssist, ASSIST_RULES } from '../game/src/assist.js';
+import { Vehicle } from '../game/src/vehicle.js';
+import { CARS, CAR_BUDGET } from '../game/src/config.js';
+
+test('power-up blocks come in pairs showing two different powers, re-rolled on respawn', () => {
+  let seed = 1;
+  const rand = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  const list = layoutPickups(3000, 9, { rand });
+  const powers = list.filter((p) => p.kind === 'power');
+  assert.ok(powers.length >= 4 && powers.length % 2 === 0);
+  for (let i = 0; i < powers.length; i += 2) {
+    assert.equal(powers[i].slot, powers[i + 1].slot);
+    assert.notEqual(powers[i].power, powers[i + 1].power);
+    assert.ok(POWER_IDS.includes(powers[i].power));
+  }
+  const st = new PickupState(powers.slice(0, 2));
+  for (let k = 0; k < 30; k++) {
+    st.take(st.items[0]);
+    st.update(PICKUP_RULES.powerRespawn + 0.1, rand);
+    assert.notEqual(st.items[0].power, st.items[1].power);
+  }
+});
+
+test('AI only fires power-ups that will likely hit, and spares shielded players', () => {
+  const ctx = (o) => ({ held: 5, near: [], ahead: [], behind: [], myLat: 0, strike: null, ...o });
+  assert.ok(aiWantsPower('shockwave', ctx({ near: [{ dist: 8, shielded: false }] })));
+  assert.ok(!aiWantsPower('shockwave', ctx({ near: [{ dist: 30, shielded: false }] })));
+  assert.ok(!aiWantsPower('shockwave', ctx({ near: [{ dist: 8, shielded: false }, { dist: 12, shielded: true }] })));
+  assert.ok(aiWantsPower('ricochet', ctx({ ahead: [{ gap: 60, lat: 0, shielded: false }] })));
+  assert.ok(!aiWantsPower('ricochet', ctx({ ahead: [{ gap: 60, lat: 0, shielded: true }] })));
+  assert.ok(!aiWantsPower('ricochet', ctx({ ahead: [{ gap: 400, lat: 0, shielded: false }] })));
+  assert.ok(aiWantsPower('oil', ctx({ behind: [{ gap: 20, lat: 1, shielded: false }] })));
+  assert.ok(!aiWantsPower('oil', ctx({ behind: [{ gap: 20, lat: 7, shielded: false }] })));
+  assert.ok(aiWantsPower('strike', ctx({ strike: { shielded: false } })));
+  assert.ok(!aiWantsPower('strike', ctx({ strike: null })));
+  assert.ok(AI_POWER.cooldown >= 5 && AI_POWER.humanShield >= 8);
+});
+
+test('drive assist: holding only the throttle completes a lap without a wall crash', () => {
+  for (const id of ['city', 'canyon']) {
+    const lay = LAYOUTS[id];
+    const t = new TrackPath(lay.points, { width: lay.width });
+    for (const car of [CARS[1], CARS[4]]) {
+      const v = new Vehicle(car);
+      v.placeOnTrack(t, 0, 0, 0);
+      const a = new DriveAssist(t);
+      let dist = 0, last = v.s, time = 0;
+      while (dist < t.length && time < 120) {
+        const c = a.apply(v, { steer: 0, throttle: 1, brake: 0, handbrake: false, boost: true });
+        v.update(1 / 120, c, 1);
+        const h = v.constrain(t);
+        assert.ok(!(h && isWallCrash({ speed: h.speed, angleDeg: h.angle }, ASSIST_RULES)), `${id} ${car.name} crashed`);
+        dist += t.deltaS(last, v.s); last = v.s; time += 1 / 120;
+      }
+      assert.ok(dist >= t.length, `${id} ${car.name} only got ${dist.toFixed(0)} m`);
+    }
+  }
+});
+
+test('a car steering away from the rail gets free quickly and keeps its speed', () => {
+  const t = new TrackPath(circle(400), { width: 20 });
+  const v = new Vehicle(CARS[0]);
+  v.placeOnTrack(t, 0, 4, 0);
+  v.heading -= 0.45; // angled toward the outside wall (positive lateral is the inside here)
+  v.vx = Math.sin(v.heading) * 40; v.vz = Math.cos(v.heading) * 40;
+  let hitAt = null, time = 0, freeAt = null;
+  while (time < 4 && freeAt === null) {
+    const steer = hitAt === null ? 0 : -0.8;
+    v.update(1 / 120, { steer, throttle: 1, brake: 0, handbrake: false, boost: false }, 1);
+    if (v.constrain(t) && hitAt === null) hitAt = time;
+    if (hitAt !== null && time - hitAt > 0.05 && Math.abs(v.lateral) < t.halfWidth - 2.6) freeAt = time;
+    time += 1 / 120;
+  }
+  assert.ok(hitAt !== null, 'never reached the wall');
+  assert.ok(freeAt !== null && freeAt - hitAt < 1.0, `stuck for ${freeAt === null ? '>4' : (freeAt - hitAt).toFixed(2)} s`);
+  assert.ok(v.speed > 25, `speed ${v.speed.toFixed(1)}`);
+});
+
+test('every car spends the points budget (within 10%), most exactly', () => {
+  let exact = 0;
+  for (const c of CARS) {
+    assert.ok(Math.abs(c.total - CAR_BUDGET) <= CAR_BUDGET * 0.1, `${c.name} ${c.total}`);
+    for (const v of Object.values(c.points)) assert.ok(v >= 1 && v <= 10);
+    if (c.total === CAR_BUDGET) exact++;
+  }
+  assert.ok(exact > CARS.length / 2);
+});

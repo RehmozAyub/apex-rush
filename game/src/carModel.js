@@ -162,10 +162,10 @@ function loft(keys, length, { stations = 30, M = 28, n = 4.5 } = {}) {
       const k = (ring * R + j) * 3;
       cx += pos[k]; cy += pos[k + 1]; cz += pos[k + 2];
       pos.push(pos[k], pos[k + 1], pos[k + 2]);
-      uvs.push(0.001, 0.001);
+      uvs.push(0.01, 0.25);
     }
     pos.push(cx / M, cy / M, cz / M);
-    uvs.push(0.001, 0.001);
+    uvs.push(0.01, 0.25);
     const center = base + M;
     for (let j = 0; j < M; j++) {
       const a = base + j, b = base + ((j + 1) % M);
@@ -212,16 +212,23 @@ function bodyDetailTexture(styleId, S) {
     g.fillRect(0, y, W, 1);
   }
   // wheel-arch shading on both lower sides
+  // (rows cover less of the body than columns, so squash the circles to stay round on the car)
   const half = S.wheelBase / 2;
+  const md = interp(S.body, 0.5);
+  const squash = (H / (2 * (md[0] + md[1]) + 2 * (md[3] - md[2]))) / (W / L);
   for (const z of [-half, half]) {
     const u = 0.5 + z / L;
-    for (const v of [0.9, 0.6]) {
+    for (const v of [0.94, 0.56]) {
       const r = ((S.wheelR + 0.25) / L) * W;
-      const grd = g.createRadialGradient(u * W, yOf(v), r * 0.2, u * W, yOf(v), r);
+      g.save();
+      g.translate(u * W, yOf(v));
+      g.scale(1, squash);
+      const grd = g.createRadialGradient(0, 0, r * 0.2, 0, 0, r);
       grd.addColorStop(0, 'rgba(0,0,0,0.55)');
       grd.addColorStop(1, 'rgba(0,0,0,0)');
       g.fillStyle = grd;
-      g.fillRect(u * W - r, yOf(v) - r, r * 2, r * 2);
+      g.fillRect(-r, -r, r * 2, r * 2);
+      g.restore();
     }
   }
   // panel seams
@@ -247,6 +254,174 @@ function bodyDetailTexture(styleId, S) {
   t.colorSpace = THREE.SRGBColorSpace;
   t.anisotropy = 4;
   bodyTexCache.set(styleId, t);
+  return t;
+}
+
+// --- liveries --------------------------------------------------------------------
+// Paint + per-style livery graphics + the baked detail layer, drawn into one body texture.
+// Canvas layout follows the body uvs: x = along the car (rear -> front), rows = around the
+// section (+x side centred on the top/bottom edges, top at 3/4 height, -x side in the middle).
+// Graphics are authored in metres on a "side frame" (x from the rear bumper, y up from the
+// side's centre line) and stamped onto both sides.
+const liveryCache = new Map(); // key -> texture (small LRU; a race needs at most 9 at once)
+const hexCss = (h) => `#${h.toString(16).padStart(6, '0')}`;
+
+function liveryPalette(paintHex) {
+  const pc = new THREE.Color(paintHex);
+  const hsl = {};
+  pc.getHSL(hsl);
+  const lum = 0.2126 * pc.r + 0.7152 * pc.g + 0.0722 * pc.b;
+  const light = lum > 0.45 ? '#15161a' : '#f3f3f3';
+  const accent = hsl.s < 0.25
+    ? (hsl.l > 0.5 ? '#e8163c' : '#ff8a00')
+    : `#${new THREE.Color().setHSL((hsl.h + 0.5) % 1, 0.9, hsl.l > 0.5 ? 0.38 : 0.58).getHexString()}`;
+  return { base: hexCss(paintHex), light, accent, lum };
+}
+
+function liveryTexture(styleId, S, paintHex) {
+  const key = `${styleId}:${paintHex}`;
+  if (liveryCache.has(key)) {
+    const t = liveryCache.get(key);
+    liveryCache.delete(key);
+    liveryCache.set(key, t);
+    return t;
+  }
+  const W = 1024, H = 512, L = S.length;
+  const c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const g = c.getContext('2d');
+  const pal = liveryPalette(paintHex);
+  g.fillStyle = pal.base;
+  g.fillRect(0, 0, W, H);
+
+  const mid = interp(S.body, 0.5);
+  const perim = 2 * (mid[0] + mid[1]) + 2 * (mid[3] - mid[2]);
+  const pu = W / L, pv = H / perim; // canvas px per metre along / around the body
+  const X = (m) => m * pu, Y = (m) => -m * pv;
+  const ra = L / 2 - S.wheelBase / 2, fa = L / 2 + S.wheelBase / 2; // axle positions from the rear
+  let mirror = false;
+  // run fn once per side in that side's frame (+x side wraps across the top/bottom edges)
+  const side = (fn) => {
+    for (const [ty, flip, mir] of [[H, 1, true], [0, 1, true], [H / 2, -1, false]]) {
+      g.save(); g.translate(0, ty); g.scale(1, flip); mirror = mir; fn(); g.restore();
+    }
+  };
+  // top frame: y = metres across the car from the centre line
+  const top = (fn) => { g.save(); g.translate(0, 0.75 * H); mirror = false; fn(); g.restore(); };
+  const poly = (pts, fill) => {
+    g.beginPath();
+    pts.forEach(([x, y], i) => (i ? g.lineTo(X(x), Y(y)) : g.moveTo(X(x), Y(y))));
+    g.closePath();
+    g.fillStyle = fill;
+    g.fill();
+  };
+  const line = (x0, y0, x1, y1, w, col) => {
+    g.beginPath(); g.moveTo(X(x0), Y(y0)); g.lineTo(X(x1), Y(y1));
+    g.lineWidth = w * pv; g.strokeStyle = col; g.lineCap = 'round'; g.stroke();
+  };
+  // text h metres tall, reading correctly on both sides
+  const text = (str, x, y, h, fill, { stroke = null, box = null, weight = 800 } = {}) => {
+    g.save();
+    g.translate(X(x), Y(y));
+    g.scale(mirror ? -1 : 1, pv / pu);
+    g.font = `italic ${weight} ${h * pu * 1.25}px Bahnschrift, 'Arial Narrow', 'Segoe UI', sans-serif`;
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    const w = g.measureText(str).width;
+    if (box) { g.fillStyle = box; g.fillRect(-w / 2 - h * pu * 0.3, -h * pu * 0.72, w + h * pu * 0.6, h * pu * 1.44); }
+    if (stroke) { g.lineWidth = h * pu * 0.18; g.strokeStyle = stroke; g.lineJoin = 'round'; g.strokeText(str, 0, 0); }
+    g.fillStyle = fill;
+    g.fillText(str, 0, 0);
+    g.restore();
+  };
+
+  if (styleId === 'wedge') { // VIPER: sharp shards sweeping back from the front arch
+    side(() => {
+      poly([[fa + 0.6, -0.1], [fa - 0.1, 0.14], [ra - 0.1, 0.3], [ra + 0.7, 0.12], [fa - 0.5, -0.02]], pal.light);
+      poly([[fa + 0.35, -0.2], [fa - 0.3, -0.08], [ra + 0.4, 0.02], [ra + 1.1, -0.08], [fa - 0.7, -0.17]], pal.accent);
+      text('APEX', ra + 0.65, -0.2, 0.15, pal.light, { stroke: 'rgba(0,0,0,0.35)' });
+    });
+  } else if (styleId === 'gt') { // BOLT: double coach pinstripe and a small script badge
+    const gold = pal.lum > 0.55 ? '#6a4a10' : '#e0b860';
+    side(() => {
+      line(0.3, 0.16, L - 0.35, 0.13, 0.03, gold);
+      line(0.35, 0.1, L - 0.5, 0.075, 0.016, gold);
+      poly([[0.2, -0.12], [L - 0.2, -0.16], [L - 0.2, -0.6], [0.2, -0.6]], 'rgba(0,0,0,0.28)');
+      line(0.2, -0.12, L - 0.2, -0.16, 0.02, gold);
+      text('GRAND TOURER', fa - 0.75, -0.02, 0.1, gold, { weight: 600 });
+    });
+  } else if (styleId === 'hatch') { // RAPTOR: fading checkered band and the name on the quarter
+    side(() => {
+      const sq = 0.12;
+      for (let i = 0; i < 18; i++) {
+        const a = 1 - i / 18;
+        for (let r = 0; r < 2; r++) {
+          if ((i + r) % 2) continue;
+          g.globalAlpha = a;
+          poly([[0.15 + i * sq, -0.22 + r * sq], [0.15 + (i + 1) * sq, -0.22 + r * sq], [0.15 + (i + 1) * sq, -0.22 + (r + 1) * sq], [0.15 + i * sq, -0.22 + (r + 1) * sq]], pal.light);
+        }
+      }
+      g.globalAlpha = 1;
+      line(0.15, -0.24, L - 0.3, -0.24, 0.04, pal.accent);
+      text('RAPTOR', ra + 0.25, 0.14, 0.16, pal.light, { stroke: 'rgba(0,0,0,0.35)' });
+    });
+  } else if (styleId === 'muscle') { // TITAN: hot-rod flames licking back from the nose
+    side(() => {
+      const grd = g.createLinearGradient(X(L), 0, X(L * 0.52), 0);
+      grd.addColorStop(0, '#fff2a0');
+      grd.addColorStop(0.35, '#ffb020');
+      grd.addColorStop(0.75, '#ff4a10');
+      grd.addColorStop(1, '#c01010');
+      g.beginPath();
+      g.moveTo(X(L), Y(-0.2));
+      const tips = [[-0.16, 0.62], [-0.06, 0.53], [0.03, 0.66], [0.11, 0.56], [0.19, 0.7]];
+      let px = L, py = -0.2;
+      for (const [ty, tx] of tips) {
+        const tipX = L * tx;
+        g.bezierCurveTo(X(px - 0.4), Y(py), X(tipX + 0.35), Y(ty - 0.05), X(tipX), Y(ty));
+        g.bezierCurveTo(X(tipX + 0.3), Y(ty + 0.03), X(L * 0.82), Y(ty + 0.02), X(L * 0.86), Y(ty + 0.045));
+        px = L * 0.86; py = ty + 0.045;
+      }
+      g.lineTo(X(L), Y(0.24));
+      g.closePath();
+      g.fillStyle = grd;
+      g.fill();
+      g.lineWidth = 0.014 * pv;
+      g.strokeStyle = '#3a0804';
+      g.stroke();
+    });
+  } else if (styleId === 'hyper') { // PHANTOM: dark lower half split by a neon line
+    side(() => {
+      poly([[0, 0.12], [L, -0.1], [L, -0.6], [0, -0.6]], '#141518');
+      line(0, 0.12, L, -0.1, 0.045, pal.accent);
+      text('PHANTOM', L / 2 + 0.15, -0.14, 0.13, pal.accent, { weight: 700 });
+    });
+    top(() => { poly([[L, -0.03], [L, 0.03], [fa - 0.4, 0.14], [fa - 0.3, 0], [fa - 0.4, -0.14]], pal.accent); });
+  } else if (styleId === 'rally') { // ROGUE: rally blocks and sponsor panels
+    side(() => {
+      poly([[L, -0.5], [L, 0.5], [fa - 0.35, 0.5], [fa - 1.05, -0.5]], pal.accent);
+      poly([[fa - 1.05, -0.5], [fa - 0.35, 0.5], [fa - 0.2, 0.5], [fa - 0.9, -0.5]], pal.light);
+      text('RUSH', fa + 0.2, 0.02, 0.2, pal.light, { stroke: 'rgba(0,0,0,0.3)' });
+      text('NITRO', ra - 0.05, 0.14, 0.12, pal.base, { box: pal.light });
+      text('TURBO', ra + 0.05, -0.12, 0.1, pal.light, { weight: 700 });
+    });
+    top(() => { poly([[L, -0.9], [L, 0.9], [fa - 0.2, 0.9], [fa - 0.2, -0.9]], pal.accent); });
+  }
+
+  // baked shading, seams and handles on top
+  g.globalCompositeOperation = 'multiply';
+  g.drawImage(bodyDetailTexture(styleId, S).image, 0, 0, W, H);
+  g.globalCompositeOperation = 'source-over';
+
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 4;
+  liveryCache.set(key, t);
+  while (liveryCache.size > 14) {
+    const [k, old] = liveryCache.entries().next().value;
+    liveryCache.delete(k);
+    old.dispose();
+  }
   return t;
 }
 
@@ -310,7 +485,8 @@ function mergeClean(list, keepUv = false) {
     const n = g.index ? g.toNonIndexed() : g;
     if (!n.attributes.normal) n.computeVertexNormals();
     for (const k of Object.keys(n.attributes)) if (!(k === 'position' || k === 'normal' || (keepUv && k === 'uv'))) n.deleteAttribute(k);
-    if (keepUv && !n.attributes.uv) n.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(n.attributes.position.count * 2), 2));
+    // parts without their own uvs sample a plain patch of the body texture (rear of the roof line)
+    if (keepUv && !n.attributes.uv) n.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(n.attributes.position.count * 2).map((_, i) => (i % 2 ? 0.25 : 0.01)), 2));
     return n;
   });
   return mergeGeometries(clean, false);
@@ -472,8 +648,8 @@ export function buildCar(styleId, paintHex, { underglow = null, number = null } 
   root.add(body);
 
   const paint = new THREE.MeshPhysicalMaterial({
-    color: paintHex, metalness: 0.6, roughness: 0.38, clearcoat: 1, clearcoatRoughness: 0.03, envMapIntensity: 1.3, side: THREE.DoubleSide,
-    map: bodyDetailTexture(styleId, S), normalMap: flakeNormalTexture(), normalScale: new THREE.Vector2(0.14, 0.14),
+    color: 0xffffff, metalness: 0.6, roughness: 0.38, clearcoat: 1, clearcoatRoughness: 0.03, envMapIntensity: 1.3, side: THREE.DoubleSide,
+    map: liveryTexture(styleId, S, paintHex), normalMap: flakeNormalTexture(), normalScale: new THREE.Vector2(0.14, 0.14),
   });
   const pc = new THREE.Color(paintHex);
   const lum = 0.2126 * pc.r + 0.7152 * pc.g + 0.0722 * pc.b;

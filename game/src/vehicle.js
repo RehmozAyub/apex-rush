@@ -145,6 +145,8 @@ export class Vehicle {
     }
     this.scraping = Math.max(0, this.scraping - 0.1);
     const lim = track.halfWidth - 1.1;
+    const wasTouching = this.touching;
+    this.touching = false;
     if (Math.abs(p.lateral) <= lim) return null;
     const side = Math.sign(p.lateral);
     const pen = Math.abs(p.lateral) - lim;
@@ -153,18 +155,31 @@ export class Vehicle {
     this.lateral = side * lim;
     const vn = -(this.vx * nx + this.vz * nz);
     if (vn <= 0) return null;
+    this.touching = true;
+    const fresh = !wasTouching; // a new impact, not the car still rubbing along the rail
     const speed = Math.hypot(this.vx, this.vz);
     const angle = Math.asin(Math.min(1, vn / Math.max(speed, 1e-3))) * 180 / Math.PI;
-    this.vx += nx * vn * 1.3;
-    this.vz += nz * vn * 1.3;
-    const fr = Math.min(0.6, vn * 0.016);
+    // bounce off, always with a little push away so the car doesn't cling to the rail
+    const out = Math.max(vn * 1.3, vn + 1.5);
+    this.vx += nx * out;
+    this.vz += nz * out;
+    // speed lost once per impact; rubbing along the rail costs very little
+    // heavier cars (more STRENGTH) plough through with less speed lost
+    const fr = (fresh ? Math.min(0.35, vn * 0.012) : Math.min(0.01, vn * 0.002)) / this.mass;
     this.vx *= 1 - fr; this.vz *= 1 - fr;
     if (!this.wrecked) {
-      // glance off: align with the wall
-      const target = Math.abs(rel) > Math.PI / 2 ? th + Math.PI : th;
+      // glance off: turn to run alongside the wall, angled slightly away from it
+      const back = Math.abs(rel) > Math.PI / 2;
+      const a = 0.1;
+      const ca = Math.cos(a), sa = Math.sin(a), dirS = back ? -1 : 1;
+      const target = Math.atan2(dirS * p.tx * ca + nx * sa, dirS * p.tz * ca + nz * sa);
       const d = wrapAngle(target - this.heading);
-      this.heading = wrapAngle(this.heading + d * Math.min(0.5, vn * 0.03));
-      this.yawRate *= 0.6;
+      // only pull the nose away from the wall, never back into it
+      const intoWall = Math.sin(this.heading) * nx + Math.cos(this.heading) * nz < Math.sin(target) * nx + Math.cos(target) * nz;
+      if (intoWall) this.heading = wrapAngle(this.heading + d * (fresh ? Math.min(0.5, vn * 0.03) : 0.08));
+      // damp spin only when it turns the car into the wall (heading' = -yawRate)
+      const turningIn = -this.yawRate * d < 0;
+      if (fresh || turningIn) this.yawRate *= turningIn ? 0.6 : 0.85;
       this.scraping = 1;
     }
     return {

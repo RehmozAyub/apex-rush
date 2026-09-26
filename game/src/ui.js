@@ -1,5 +1,10 @@
 // DOM overlay: menus, HUD, popups, countdown, results.
 import { formatTime } from './race.js';
+import { POWERS, POWER_IDS } from './powerups.js';
+import { CAR_BUDGET } from './config.js';
+import { powerIconURL } from './powerIcons.js';
+
+const icon = (id) => `<img class="picon" src="${powerIconURL(id)}" alt="">`;
 
 const $ = (sel, el = document) => el.querySelector(sel);
 
@@ -49,8 +54,8 @@ export class UI {
           <div><b>A D / ← →</b> Steer</div><div><b>SPACE</b> Handbrake / Drift</div>
           <div><b>SHIFT</b> Boost</div><div><b>C</b> Camera</div>
           <div><b>E</b> Use power-up</div><div><b>R</b> Reset car</div>
-          <div><b>ESC</b> Pause</div><div><b>F11</b> Fullscreen</div>
-          <div class="pad">Gamepad: RT/LT drive · A boost · X drift · LB power-up · Y camera</div>
+          <div><b>H</b> Drive assist on/off</div><div><b>ESC</b> Pause</div>
+          <div class="pad">Gamepad: RT/LT drive · A boost · X drift · LB power-up · Y camera · BACK assist</div>
         </div>
       </section>
 
@@ -66,11 +71,11 @@ export class UI {
             <p>Fill the meter by <b>drifting</b>, <b>near misses</b>, <b>slipstreaming</b> behind rivals, <b>takedowns</b> and <b>boost rings</b> on the road. Chain moves quickly for an adrenaline multiplier up to <b>×5</b>.</p>
             <h2>TAKEDOWNS</h2>
             <p>Slam a rival hard, or shove them into a wall. Hit a wall head-on or get rammed and you crash.</p>
+            <h2>DRIVE ASSIST</h2>
+            <p>On by default: let go of the steering and the car follows the road, it slows for tight bends and shrugs off wall hits. Press <b>H</b> in a race (or use the pause menu) to drive fully manual.</p>
             <h2>POWER-UPS</h2>
-            <p><i class="pu c1"></i><b>SHOCKWAVE</b> wrecks everyone near you</p>
-            <p><i class="pu c2"></i><b>RICOCHET</b> bouncing shot that hunts down the road</p>
-            <p><i class="pu c3"></i><b>LIGHTNING STRIKE</b> hits the car ahead</p>
-            <p><i class="pu c4"></i><b>OIL SLICK</b> dropped behind you, chasers crash</p>
+            <p class="note">Every block shows what's inside. Drive through one to grab it (a new one replaces the one you hold). Rivals use them too.</p>
+            ${POWER_IDS.map((id) => `<p class="pw">${icon(id)}<b style="color:${POWERS[id].color}">${POWERS[id].name}</b> ${POWERS[id].desc.toLowerCase()}</p>`).join('')}
           </div>
           <div class="col">
             <h2>CONTROLS</h2>
@@ -82,6 +87,7 @@ export class UI {
               <tr><td>Power-up</td><td>E</td><td>E</td><td>Enter</td><td>LB</td></tr>
               <tr><td>Camera</td><td>C</td><td>C</td><td>\\</td><td>Y</td></tr>
               <tr><td>Reset car</td><td>R</td><td>R</td><td>]</td><td></td></tr>
+              <tr><td>Drive assist</td><td>H</td><td>H</td><td>[</td><td>Back</td></tr>
               <tr><td>Pause</td><td>Esc</td><td colspan="2">Esc</td><td>Start</td></tr>
             </table>
             <p class="note">Two gamepads? The first controls player 1, the second player 2. F11 toggles fullscreen.</p>
@@ -140,7 +146,8 @@ export class UI {
           <div class="bar"><div class="fill x-boost"></div><div class="segs">${'<i></i>'.repeat(10)}</div></div>
           <div class="lbl">BOOST</div>
         </div>
-        <div class="h-power"><div class="pic"></div><div class="pname"></div><div class="pkey">E</div></div>
+        <div class="h-power"><div class="pic"><img alt=""></div><div class="pname"></div><div class="pkey">E</div></div>
+        <div class="h-assist">ASSIST</div>
         <div class="h-speedo">
           <svg viewBox="0 0 200 200" class="gauge">
             <path d="M 30 150 A 80 80 0 1 1 170 150" class="track"/>
@@ -156,7 +163,7 @@ export class UI {
         view: v, pos: q('.x-pos'), total: q('.x-total'), lap: q('.x-lap'), laps: q('.x-laps'), laptime: q('.x-laptime'), best: q('.x-best'),
         td: q('.x-td'), boost: q('.x-boost'), mult: q('.mult'), chain: q('.x-chain'), speed: q('.x-speed'), gear: q('.x-gear'),
         rpm: q('.x-rpm'), banner: q('.h-banner'), popups: q('.popups'), countdown: q('.countdown'), power: q('.h-power'),
-        minimap: q('.minimap'), last: {},
+        minimap: q('.minimap'), assist: q('.h-assist'), last: {},
       };
       el.chain.style.strokeDasharray = `${this.chainLen}`;
       this.huds.push(el);
@@ -199,12 +206,18 @@ export class UI {
 
   trackCards(maps, index, lengths) {
     const el = $('#cards');
+    const n = maps.length;
+    const random = `
+      <div class="card random${index === n ? ' sel' : ''}" data-i="${n}">
+        <div class="art">${maps.map((m) => `<i class="c-${m.id}"><b class="art"></b></i>`).join('')}</div>
+        <div class="info"><div class="name">RANDOM TRACK</div><div class="tag">Any of the ${n}, picked at the start line</div></div>
+      </div>`;
     el.innerHTML = maps.map((m, i) => `
       <div class="card c-${m.id}${i === index ? ' sel' : ''}" data-i="${i}">
         <div class="art"></div>
         <div class="info"><div class="num">0${i + 1}</div><div class="name">${m.name}</div><div class="tag">${m.tagline}</div>
           <div class="meta"><span class="wx">${m.weatherLabel || ''}</span><span>${(lengths[i] / 1000).toFixed(2)} KM</span><span>8 CARS</span></div></div>
-      </div>`).join('');
+      </div>`).join('') + random;
     return el;
   }
 
@@ -220,8 +233,11 @@ export class UI {
       nameEl.style.fontSize = `${size}vh`;
     }
     $('#cardesc').textContent = car.desc;
-    $('#stats').innerHTML = [['SPEED', car.stats.speed], ['ACCEL', car.stats.accel], ['HANDLING', car.stats.handling]]
-      .map(([k, v]) => `<div class="stat"><span>${k}</span><div class="sbar"><i style="width:${Math.round(v * 100)}%"></i></div></div>`).join('');
+    // ten-point bars; every car spends the same budget (a couple get one point extra)
+    const extra = car.total - CAR_BUDGET;
+    $('#stats').innerHTML = [['SPEED', car.points.speed], ['ACCEL', car.points.accel], ['HANDLING', car.points.handling], ['STRENGTH', car.points.strength]]
+      .map(([k, v]) => `<div class="stat"><span>${k}</span><div class="sbar pts">${'<i></i>'.repeat(v)}${'<i class="off"></i>'.repeat(10 - v)}</div><em>${v}</em></div>`).join('') +
+      `<div class="stat total"><span>POINTS</span><b>${car.total}</b><small>${extra > 0 ? `+${extra} OVER THE ${CAR_BUDGET} BUDGET` : `BALANCED ${CAR_BUDGET}-POINT BUILD`}</small></div>`;
     $('#swatches').innerHTML = paints.map((p, i) => `<i class="${i === paintIndex ? 'sel' : ''}" data-i="${i}" style="background:#${p.hex.toString(16).padStart(6, '0')}"></i>`).join('');
     $('#paintname').textContent = paints[paintIndex].name.toUpperCase();
   }
@@ -254,12 +270,13 @@ export class UI {
       L.pkey = d.powerKey;
       const el = e.power;
       el.className = `h-power ${pw ? 'show' : ''} p-${pw}`;
-      const names = { shockwave: 'SHOCKWAVE', ricochet: 'RICOCHET', strike: 'LIGHTNING STRIKE', oil: 'OIL SLICK' };
-      $('.pname', el).textContent = names[pw] || '';
+      if (pw) $('.pic img', el).src = powerIconURL(pw);
+      $('.pname', el).textContent = pw ? POWERS[pw].name : '';
       $('.pkey', el).textContent = d.powerKey || 'E';
     }
-    const banner = d.wrongWay ? 'WRONG WAY' : d.drafting ? 'SLIPSTREAM' : '';
-    if (L.banner !== banner) { L.banner = banner; e.banner.textContent = banner; e.banner.className = `h-banner ${banner ? (d.wrongWay ? 'bad show' : 'show') : ''}`; }
+    if (L.assist !== d.assist) { L.assist = d.assist; e.assist.classList.toggle('on', !!d.assist); }
+    const banner = d.wrongWay ? 'WRONG WAY' : d.incoming ? 'INCOMING!' : d.drafting ? 'SLIPSTREAM' : '';
+    if (L.banner !== banner) { L.banner = banner; e.banner.textContent = banner; e.banner.className = `h-banner ${banner ? (d.wrongWay || d.incoming ? 'bad show' : 'show') : ''}`; }
   }
 
   popup(title, sub = '', kind = '', i = 0) {

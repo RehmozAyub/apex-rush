@@ -1,7 +1,50 @@
-// Visuals for road pickups (boost rings, power-up crystals) and power-up effects
+// Visuals for road pickups (boost rings, power-up blocks) and power-up effects
 // (shockwave ring, ricochet orb, oil slick, lightning bolt).
+// Each power-up block is colour coded and shows its power's icon and name, so drivers can see
+// what they would get before driving through it.
 import * as THREE from 'three';
 import { radialTexture } from './textures.js';
+import { POWERS, POWER_IDS } from './powerups.js';
+import { drawPowerIcon } from './powerIcons.js';
+
+function iconTexture(id) {
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const g = c.getContext('2d');
+  const bg = g.createRadialGradient(64, 64, 10, 64, 64, 64);
+  bg.addColorStop(0, 'rgba(0,0,0,0.55)');
+  bg.addColorStop(1, 'rgba(0,0,0,0)');
+  g.fillStyle = bg;
+  g.fillRect(0, 0, 128, 128);
+  g.translate(16, 16);
+  drawPowerIcon(g, id, 96);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+function labelTexture(id) {
+  const c = document.createElement('canvas');
+  c.width = 512; c.height = 128;
+  const g = c.getContext('2d');
+  const text = POWERS[id].name;
+  let size = 84;
+  const font = () => `italic 700 ${size}px Bahnschrift, 'Arial Narrow', 'Segoe UI', sans-serif`;
+  g.font = font();
+  while (g.measureText(text).width > 480 && size > 30) { size -= 4; g.font = font(); }
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.lineJoin = 'round';
+  g.lineWidth = 14;
+  g.strokeStyle = 'rgba(0,0,0,0.85)';
+  g.strokeText(text, 256, 66);
+  g.fillStyle = POWERS[id].color;
+  g.fillText(text, 256, 66);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 4;
+  return t;
+}
 
 // Swirled rainbow rings that fade out at the rim - the sheen on spilled oil.
 function oilSheenTexture() {
@@ -39,18 +82,25 @@ export class PickupVisuals {
     const tex = glowTex();
     this.boostMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0x19e3ff).multiplyScalar(4) });
     this.chevMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0xffffff).multiplyScalar(3) });
-    this.powerMats = [0xff2d95, 0xffd400, 0x8a3cff].map((c) => new THREE.MeshBasicMaterial({ color: new THREE.Color(c).multiplyScalar(3.5) }));
-    this.cageMat = new THREE.LineBasicMaterial({ color: new THREE.Color(0xffffff).multiplyScalar(2.5), transparent: true, opacity: 0.8 });
-    this.poolMats = {
-      boost: new THREE.MeshBasicMaterial({ map: tex, color: 0x19e3ff, transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false }),
-      power: new THREE.MeshBasicMaterial({ map: tex, color: 0xff2d95, transparent: true, opacity: 0.6, blending: THREE.AdditiveBlending, depthWrite: false }),
-    };
+    this.boostPool = new THREE.MeshBasicMaterial({ map: tex, color: 0x19e3ff, transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false });
+    // per power: see-through glowing box, bright edges, icon and name label, ground glow
+    this.types = {};
+    for (const id of POWER_IDS) {
+      const col = new THREE.Color(POWERS[id].color);
+      this.types[id] = {
+        box: new THREE.MeshBasicMaterial({ color: col.clone().multiplyScalar(0.8), transparent: true, opacity: 0.25, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }),
+        edge: new THREE.LineBasicMaterial({ color: col.clone().multiplyScalar(3.2) }),
+        icon: new THREE.SpriteMaterial({ map: iconTexture(id), depthWrite: false, toneMapped: false }),
+        label: new THREE.SpriteMaterial({ map: labelTexture(id), depthWrite: false, toneMapped: false }),
+        pool: new THREE.MeshBasicMaterial({ map: tex, color: col, transparent: true, opacity: 0.7, blending: THREE.AdditiveBlending, depthWrite: false }),
+      };
+    }
     const ring = new THREE.TorusGeometry(1.25, 0.09, 8, 36);
     const chev = new THREE.BoxGeometry(0.16, 0.8, 0.12);
     const pool = new THREE.PlaneGeometry(5, 5).rotateX(-Math.PI / 2);
-    const crystal = new THREE.OctahedronGeometry(0.9, 0);
-    const cage = new THREE.EdgesGeometry(new THREE.BoxGeometry(2.1, 2.1, 2.1));
-    this.geos = [ring, chev, pool, crystal, cage];
+    const box = new THREE.BoxGeometry(1.9, 1.9, 1.9);
+    const cage = new THREE.EdgesGeometry(box);
+    this.geos = [ring, chev, pool, box, cage];
     this.nodes = new Map();
     for (const it of items) {
       const p = track.pointAt(it.s, it.lateral);
@@ -72,23 +122,34 @@ export class PickupVisuals {
             float.add(c);
           }
         }
-      } else {
-        const cr = new THREE.Mesh(crystal, this.powerMats[it.id % 3]);
-        float.add(cr);
-        float.add(new THREE.LineSegments(cage, this.cageMat));
-        float.userData.spin = cr;
       }
-      const pl = new THREE.Mesh(pool, this.poolMats[it.kind]);
+      const pl = new THREE.Mesh(pool, this.boostPool);
       pl.position.y = 0.06;
       pl.renderOrder = 1;
       g.add(pl);
       g.userData = { float, grow: 1 };
+      if (it.kind === 'power') {
+        const T = this.types[it.power];
+        const spin = new THREE.Group();
+        const b = new THREE.Mesh(box, T.box);
+        const e = new THREE.LineSegments(cage, T.edge);
+        spin.add(b, e);
+        const icon = new THREE.Sprite(T.icon);
+        icon.scale.setScalar(1.6);
+        const label = new THREE.Sprite(T.label);
+        label.scale.set(5.2, 1.3, 1);
+        label.position.y = 2.1;
+        float.add(spin, icon, label);
+        float.userData.spin = spin;
+        g.userData.parts = { b, e, icon, label, pl };
+        this.paint(g, it.power);
+      }
       this.group.add(g);
       this.nodes.set(it.id, g);
     }
 
     // effect meshes
-    this.shockMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0x19e3ff).multiplyScalar(3), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
+    this.shockMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0x2ee86a).multiplyScalar(3), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
     this.shock = new THREE.Mesh(new THREE.RingGeometry(0.85, 1, 64).rotateX(-Math.PI / 2), this.shockMat);
     this.shock.visible = false;
     scene.add(this.shock);
@@ -175,6 +236,13 @@ export class PickupVisuals {
     if (!g) return;
     g.visible = on;
     if (on) g.userData.grow = 0;
+    if (on && it.kind === 'power') this.paint(g, it.power);
+  }
+
+  // show power `id` on a block
+  paint(g, id) {
+    const T = this.types[id], P = g.userData.parts;
+    P.b.material = T.box; P.e.material = T.edge; P.icon.material = T.icon; P.label.material = T.label; P.pl.material = T.pool;
   }
 
   shockwave(x, y, z) {
@@ -208,7 +276,7 @@ export class PickupVisuals {
       if (!g.visible) continue;
       const f = g.userData.float;
       f.position.y = 1.45 + Math.sin(time * 2.5 + g.id) * 0.15;
-      if (f.userData.spin) { f.rotation.y = time * 1.6; f.userData.spin.rotation.x = time * 2.1; }
+      if (f.userData.spin) { f.userData.spin.rotation.set(time * 0.9, time * 1.6, 0); }
       else f.rotation.z = Math.sin(time * 3 + g.id) * 0.08;
       if (g.userData.grow < 1) {
         g.userData.grow = Math.min(1, g.userData.grow + dt * 3);
@@ -244,7 +312,8 @@ export class PickupVisuals {
     this.oilGeo.dispose();
     for (const g of this.geos) g.dispose();
     this.boltGeo.dispose();
-    for (const m of [this.boostMat, this.chevMat, ...this.powerMats, this.cageMat, this.poolMats.boost, this.poolMats.power, this.shockMat, this.boltMat, ...this.shotMats, this.oilMat, this.oilEdgeMat]) {
+    const typeMats = Object.values(this.types).flatMap((T) => Object.values(T));
+    for (const m of [this.boostMat, this.chevMat, this.boostPool, ...typeMats, this.shockMat, this.boltMat, ...this.shotMats, this.oilMat, this.oilEdgeMat]) {
       if (m.map) m.map.dispose();
       m.dispose();
     }

@@ -1,7 +1,7 @@
 // Road pickups (pure logic): boost pickups that respawn, and takedown power-ups.
 
 export const POWERS = {
-  shockwave: { name: 'SHOCKWAVE', desc: 'Wrecks every rival close to you', color: '#19e3ff' },
+  shockwave: { name: 'SHOCKWAVE', desc: 'Wrecks every rival close to you', color: '#2ee86a' },
   ricochet: { name: 'RICOCHET', desc: 'Bouncing shot that hunts down the road', color: '#ff8a00' },
   strike: { name: 'LIGHTNING STRIKE', desc: 'Hits the car ahead', color: '#ffd400' },
   oil: { name: 'OIL SLICK', desc: 'Drop it behind you - chasers crash', color: '#b04dff' },
@@ -12,7 +12,7 @@ export const PICKUP_RULES = {
   boostAmount: 25, // player boost gained
   aiBoostFuel: 30,
   boostRespawn: 6, // seconds
-  powerRespawn: 12,
+  powerRespawn: 9,
   radius: 2.7, // pickup radius (m)
   shockRadius: 18,
   shotSpeed: 45, // m/s faster than the player (min shotMinSpeed)
@@ -27,14 +27,17 @@ export const PICKUP_RULES = {
   strikeRange: 280, // metres of track ahead
 };
 
-// Pickup positions along the track: mostly boosts, every third slot a power-up.
-export function layoutPickups(trackLength, halfWidth, { spacing = 240, startGap = 140, endGap = 60 } = {}) {
+// Pickup positions along the track: mostly boosts; every third slot is a pair of power-up blocks
+// side by side, each showing the power it holds, so the driver can pick one (or dodge both).
+export function layoutPickups(trackLength, halfWidth, { spacing = 240, startGap = 140, endGap = 60, rand = Math.random } = {}) {
   const lanes = [-0.45, 0, 0.45, 0.2, -0.2];
   const out = [];
   let k = 0;
   for (let s = startGap; s < trackLength - endGap; s += spacing, k++) {
     if (k % 3 === 2) {
-      out.push({ kind: 'power', s, lateral: 0 });
+      const a = randomPower(rand);
+      out.push({ kind: 'power', s, lateral: -0.42 * halfWidth, slot: k, power: a });
+      out.push({ kind: 'power', s, lateral: 0.42 * halfWidth, slot: k, power: randomPower(rand, a) });
     } else {
       const lat = lanes[k % lanes.length] * halfWidth;
       out.push({ kind: 'boost', s, lateral: lat });
@@ -51,12 +54,20 @@ export class PickupState {
     this.items = list.map((p, i) => ({ ...p, id: i, active: true, timer: 0 }));
   }
 
-  update(dt) {
+  // Returns the items that came back this tick. A returning power block rolls a new power,
+  // different from the block beside it.
+  update(dt, rand = Math.random) {
     const respawned = [];
     for (const it of this.items) {
       if (it.active) continue;
       it.timer -= dt;
-      if (it.timer <= 0) { it.active = true; respawned.push(it); }
+      if (it.timer > 0) continue;
+      it.active = true;
+      if (it.kind === 'power') {
+        const other = this.items.find((o) => o !== it && o.kind === 'power' && o.slot === it.slot);
+        it.power = randomPower(rand, other && other.active ? other.power : null);
+      }
+      respawned.push(it);
     }
     return respawned;
   }
@@ -77,8 +88,43 @@ export class PickupState {
   }
 }
 
-export function randomPower(rand = Math.random) {
-  return POWER_IDS[Math.floor(rand() * POWER_IDS.length) % POWER_IDS.length];
+// A random power, optionally different from `not`.
+export function randomPower(rand = Math.random, not = null) {
+  const ids = not ? POWER_IDS.filter((p) => p !== not) : POWER_IDS;
+  return ids[Math.floor(rand() * ids.length) % ids.length];
+}
+
+// How AI rivals use power-ups: they wait a moment after grabbing one, fire only when it will
+// probably hit someone, and share a cooldown so the race doesn't turn into a war zone. A human
+// wrecked by an AI power-up is left alone for a while (`shielded`).
+export const AI_POWER = {
+  minHold: 2, // seconds before an AI uses what it picked up
+  maxHold: 24, // after this it fires at anything in reach
+  cooldown: 10, // seconds between power-ups used by any AI
+  useRate: 0.9, // chance per second of acting once a target is lined up
+  shockRange: 12,
+  shotMin: 15, shotMax: 150, // ricochet: rival ahead between these distances (m)
+  oilMin: 8, oilMax: 45, oilLat: 4, // oil: rival behind, roughly in line
+  humanShield: 12, // seconds a human is spared after an AI power-up wrecked them
+};
+
+// ctx: { held, near: [{dist, shielded}], ahead: [{gap, lat, shielded}] sorted by gap,
+//        behind: [{gap, lat, shielded}], myLat, strike: {shielded} | null }
+export function aiWantsPower(kind, ctx, R = AI_POWER) {
+  const patient = ctx.held < R.maxHold;
+  if (kind === 'shockwave') {
+    if (ctx.near.some((c) => c.shielded && c.dist < PICKUP_RULES.shockRadius)) return false;
+    return ctx.near.some((c) => c.dist < (patient ? R.shockRange : PICKUP_RULES.shockRadius));
+  }
+  if (kind === 'ricochet') {
+    const t = ctx.ahead[0];
+    return !!t && !t.shielded && t.gap >= (patient ? R.shotMin : 4) && t.gap <= R.shotMax;
+  }
+  if (kind === 'strike') return !!ctx.strike && !ctx.strike.shielded;
+  if (kind === 'oil') {
+    return ctx.behind.some((c) => !c.shielded && c.gap >= R.oilMin && c.gap <= (patient ? R.oilMax : R.oilMax * 2) && Math.abs(c.lat - ctx.myLat) < (patient ? R.oilLat : 8));
+  }
+  return false;
 }
 
 // Pick the strike target: the closest rival ahead (by race progress) within range.
