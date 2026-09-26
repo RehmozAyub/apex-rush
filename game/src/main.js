@@ -349,7 +349,7 @@ class Game {
     }
     this.ui.results(list, `${head} <small style="font-size:3vh;opacity:.8">&nbsp; ${tds}</small>${record}`);
     this.state = 'results';
-    this.menuIndex.results = 0;
+    this.menuIndex.results = 1; // NEXT TRACK is the default
     this.ui.show('results');
     this.renderResults();
   }
