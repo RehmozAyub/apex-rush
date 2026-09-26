@@ -11,8 +11,8 @@ export const POWER_IDS = Object.keys(POWERS);
 export const PICKUP_RULES = {
   boostAmount: 25, // player boost gained
   aiBoostFuel: 30,
-  respawnMin: 1, // seconds before a taken pickup (boost or power-up) comes back
-  respawnMax: 2,
+  respawnMin: 0.5, // seconds before a taken pickup (boost or power-up) comes back
+  respawnMax: 0.5,
   radius: 2.7, // pickup radius (m)
   shockRadius: 18,
   shotSpeed: 45, // m/s faster than the player (min shotMinSpeed)
@@ -101,8 +101,7 @@ export const AI_POWER = {
   minHold: 2, // seconds before an AI uses what it picked up
   maxHold: 24, // after this it fires at anything in reach
   cooldown: 18, // seconds between power-ups used by any AI
-  pickChance: 0.25, // chance an AI grabs a block it drives through
-  leaveForHuman: 150, // ...never when a human is this close behind (m)
+  pickChance: 0.5, // chance an AI grabs a block it drives through
   respawnSetback: 15, // a wrecked AI comes back this far behind where it crashed (m)
   useRate: 0.9, // chance per second of acting once a target is lined up
   shockRange: 12,
