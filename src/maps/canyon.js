@@ -73,10 +73,11 @@ export default {
     barrier: { type: 'guardrail', color: 0x9a8f84, postColor: 0x6a5a48 },
     embankment: 0xc89060,
     shoulder: 0xb88a5a,
+    shortcut: { color: 0xb08a5c },
     accent: '#ff8a00',
   },
 
-  build({ scene, track, index, density, envScene }) {
+  build({ scene, track, index, density, envScene, shortcut }) {
     const rand = rng(313);
     const hw = track.halfWidth;
     const heightAt = makeHeightFn(index, natural, { hw, near: -1.2, blendStart: 12, blendEnd: 90 });
@@ -126,6 +127,11 @@ export default {
     let prev = null;
     for (let s = 0; s < track.length; s += 55) {
       const p = track.pointAt(s, hw + 9);
+      // no poles in the shortcut's fork or on its road
+      if (shortcut) {
+        const q = shortcut.path.project(p.x, p.z);
+        if (shortcut.isGap(s, 1) || (q.beyond === 0 && Math.abs(q.lateral) < shortcut.path.halfWidth + 4)) { prev = null; continue; }
+      }
       const top = { x: p.x, y: p.y + 9, z: p.z };
       poles.push({ x: p.x, y: p.y + 4.5, z: p.z, ry: p.heading });
       if (prev) {
@@ -168,6 +174,6 @@ export default {
     const envGround = new THREE.Mesh(new THREE.CircleGeometry(300, 24).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xb07848 }));
     envGround.position.y = -6;
     envScene.add(envGround);
-    return {};
+    return { landmark: { s: [track.length * 0.35], range: 70 } }; // the water tower
   },
 };

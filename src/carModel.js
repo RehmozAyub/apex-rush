@@ -623,7 +623,8 @@ function makeWheel(r, width, cfg, caliperHex, mats) {
 }
 
 // --- the car --------------------------------------------------------------------
-export function buildCar(styleId, paintHex, { underglow = null, number = null } = {}) {
+// finish: undefined (metallic paint), 'metal' (brushed metal) or 'chrome' (mirror)
+export function buildCar(styleId, paintHex, { underglow = null, number = null, finish = null } = {}) {
   const S = STYLES[styleId] || STYLES.wedge;
   const F = S.f;
   const mats = sharedMats();
@@ -651,6 +652,8 @@ export function buildCar(styleId, paintHex, { underglow = null, number = null } 
     color: 0xffffff, metalness: 0.6, roughness: 0.38, clearcoat: 1, clearcoatRoughness: 0.03, envMapIntensity: 1.3, side: THREE.DoubleSide,
     map: liveryTexture(styleId, S, paintHex), normalMap: flakeNormalTexture(), normalScale: new THREE.Vector2(0.14, 0.14),
   });
+  if (finish === 'chrome') { paint.metalness = 1; paint.roughness = 0.12; paint.clearcoat = 0.4; paint.envMapIntensity = 1.8; }
+  else if (finish === 'metal') { paint.metalness = 0.95; paint.roughness = 0.3; paint.envMapIntensity = 1.5; }
   const pc = new THREE.Color(paintHex);
   const lum = 0.2126 * pc.r + 0.7152 * pc.g + 0.0722 * pc.b;
   const stripe = new THREE.MeshPhysicalMaterial({ color: lum > 0.45 ? 0x121316 : 0xf2f2f2, metalness: 0.2, roughness: 0.35, clearcoat: 1, clearcoatRoughness: 0.05 });

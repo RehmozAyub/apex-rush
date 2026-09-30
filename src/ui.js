@@ -72,6 +72,8 @@ export class UI {
             <p>Slam a rival hard, or shove them into a wall. Hit a wall head-on or get rammed and you crash.</p>
             <h2>DRIVE ASSIST</h2>
             <p>On by default: you steer, it helps. It nudges you away from the walls, calms over-steering, brakes for bends you'd miss and makes wall hits less punishing. Press <b>H</b> in a race (or use the pause menu) to drive fully manual.</p>
+            <h2>RIVALS &amp; SECRETS</h2>
+            <p>Whoever wrecks you becomes your <b>RIVAL</b>: take them out for a big <b>PAYBACK</b> boost. Every track hides a <b>shortcut</b> and four <b>signature takedown</b> spots. Earn <b>three stars</b> per track (win, 5 takedowns, no crashes) and unlock new paints with takedowns and stars.</p>
             <h2>POWER-UPS</h2>
             <p class="note">Every block shows what's inside. Drive through one to grab it (a new one replaces the one you hold). Rivals use them too.</p>
             ${POWER_IDS.map((id) => `<p class="pw">${icon(id)}<b style="color:${POWERS[id].color}">${POWERS[id].name}</b> ${POWERS[id].desc.toLowerCase()}</p>`).join('')}
@@ -102,6 +104,8 @@ export class UI {
 
       <section id="s-results" class="screen dim">
         <h1 class="head" id="r-head"><b>RESULTS</b></h1>
+        <div class="r-extra" id="r-extra"></div>
+        <div class="r-replay" id="r-replay"></div>
         <div class="results" id="results"></div>
         <div class="menu row" id="m-results"></div>
       </section>
@@ -138,6 +142,7 @@ export class UI {
         </div>
         <div class="h-center"><div class="h-banner"></div></div>
         <div class="popups"></div>
+        <div class="sigcards"></div>
         <div class="countdown"></div>
         <canvas class="minimap" width="200" height="200"></canvas>
         <div class="h-boost">
@@ -162,7 +167,7 @@ export class UI {
         view: v, pos: q('.x-pos'), total: q('.x-total'), lap: q('.x-lap'), laps: q('.x-laps'), laptime: q('.x-laptime'), best: q('.x-best'),
         td: q('.x-td'), boost: q('.x-boost'), mult: q('.mult'), chain: q('.x-chain'), speed: q('.x-speed'), gear: q('.x-gear'),
         rpm: q('.x-rpm'), banner: q('.h-banner'), popups: q('.popups'), countdown: q('.countdown'), power: q('.h-power'),
-        minimap: q('.minimap'), assist: q('.h-assist'), last: {},
+        minimap: q('.minimap'), assist: q('.h-assist'), sigcards: q('.sigcards'), last: {},
       };
       el.chain.style.strokeDasharray = `${this.chainLen}`;
       this.huds.push(el);
@@ -203,7 +208,8 @@ export class UI {
     });
   }
 
-  trackCards(maps, index, lengths) {
+  // prog[i]: { stars: [bool x3], sigs: found, sigTotal } for each map
+  trackCards(maps, index, lengths, prog = []) {
     const el = $('#cards');
     const n = maps.length;
     const random = `
@@ -215,12 +221,14 @@ export class UI {
       <div class="card c-${m.id}${i === index ? ' sel' : ''}" data-i="${i}">
         <div class="art"></div>
         <div class="info"><div class="num">0${i + 1}</div><div class="name">${m.name}</div><div class="tag">${m.tagline}</div>
-          <div class="meta"><span class="wx">${m.weatherLabel || ''}</span><span>${(lengths[i] / 1000).toFixed(2)} KM</span><span>8 CARS</span></div></div>
+          <div class="meta"><span class="wx">${m.weatherLabel || ''}</span><span>${(lengths[i] / 1000).toFixed(2)} KM</span><span>8 CARS</span></div>
+          ${prog[i] ? `<div class="prog"><span class="stars">${prog[i].stars.map((s) => `<i class="${s ? 'on' : ''}">★</i>`).join('')}</span><span class="sigs">SIGNATURES ${prog[i].sigs}/${prog[i].sigTotal}</span></div>` : ''}</div>
       </div>`).join('') + random;
     return el;
   }
 
-  carPanel(car, paints, paintIndex, index = 0, total = 1, who = '') {
+  // unlocked[i]: paint i is available; lockText(p): what unlocks it
+  carPanel(car, paints, paintIndex, index = 0, total = 1, who = '', unlocked = null, lockText = () => '') {
     $('#s-cars .head').innerHTML = who ? `<b>${who}</b> SELECT CAR` : '<b>SELECT</b> CAR';
     $('#carcount').textContent = `${String(index + 1).padStart(2, '0')} / ${String(total).padStart(2, '0')}`;
     const nameEl = $('#carname');
@@ -234,7 +242,8 @@ export class UI {
     $('#cardesc').textContent = car.desc;
     $('#stats').innerHTML = [['SPEED', car.stats.speed], ['ACCEL', car.stats.accel], ['HANDLING', car.stats.handling], ['STRENGTH', car.stats.strength]]
       .map(([k, v]) => `<div class="stat"><span>${k}</span><div class="sbar"><i style="width:${Math.round(v * 100)}%"></i></div></div>`).join('');
-    $('#swatches').innerHTML = paints.map((p, i) => `<i class="${i === paintIndex ? 'sel' : ''}" data-i="${i}" style="background:#${p.hex.toString(16).padStart(6, '0')}"></i>`).join('');
+    const open = (i) => !unlocked || unlocked[i];
+    $('#swatches').innerHTML = paints.map((p, i) => `<i class="${i === paintIndex ? 'sel' : ''}${open(i) ? '' : ' locked'}${p.finish ? ' ' + p.finish : ''}" data-i="${i}" title="${open(i) ? p.name : 'Unlock: ' + lockText(p)}" style="background:#${p.hex.toString(16).padStart(6, '0')}"></i>`).join('');
     $('#paintname').textContent = paints[paintIndex].name.toUpperCase();
   }
 
@@ -271,8 +280,9 @@ export class UI {
       $('.pkey', el).textContent = d.powerKey || 'E';
     }
     if (L.assist !== d.assist) { L.assist = d.assist; e.assist.classList.toggle('on', !!d.assist); }
-    const banner = d.wrongWay ? 'WRONG WAY' : d.incoming ? 'INCOMING!' : d.drafting ? 'SLIPSTREAM' : '';
-    if (L.banner !== banner) { L.banner = banner; e.banner.textContent = banner; e.banner.className = `h-banner ${banner ? (d.wrongWay || d.incoming ? 'bad show' : 'show') : ''}`; }
+    const banner = d.wrongWay ? 'WRONG WAY' : d.incoming ? 'INCOMING!' : d.drama ? d.drama : d.drafting ? 'SLIPSTREAM' : '';
+    const kind = d.wrongWay || d.incoming ? 'bad ' : d.drama && banner === d.drama ? 'hot ' : '';
+    if (L.banner !== banner) { L.banner = banner; e.banner.textContent = banner; e.banner.className = `h-banner ${banner ? kind + 'show' : ''}`; }
   }
 
   popup(title, sub = '', kind = '', i = 0) {
@@ -296,8 +306,26 @@ export class UI {
     }
   }
 
-  results(list, headline) {
+  // Signature takedown snapshot, pinned over player i's view for a few seconds.
+  signatureCard(i, photo, name, line, found, total) {
+    const box = (this.huds[i] || this.huds[0]).sigcards;
+    const c = document.createElement('div');
+    c.className = 'sigcard';
+    c.innerHTML = `<div class="sc-head">SIGNATURE TAKEDOWN <em>${found}/${total}</em></div>
+      <div class="sc-photo" style="background-image:url(${photo})"></div>
+      <div class="sc-name">${name}</div><div class="sc-line">${line}</div>`;
+    box.innerHTML = '';
+    box.appendChild(c);
+    setTimeout(() => c.classList.add('out'), 4200);
+    setTimeout(() => c.remove(), 4800);
+  }
+
+  // headline: html; extras: lines under it (new stars, paints); replay: label for the replay or ''
+  results(list, headline, extras = [], replay = '') {
     $('#r-head').innerHTML = headline;
+    $('#r-extra').innerHTML = extras.map((x) => `<span>${x}</span>`).join('');
+    $('#r-replay').innerHTML = replay ? `<b>TAKEDOWN REPLAY</b> ${replay}` : '';
+    this.screens.results.classList.toggle('replay', !!replay);
     $('#results').innerHTML = `<div class="rrow hdr"><span>POS</span><span>DRIVER</span><span>CAR</span><span>TIME</span><span>BEST LAP</span><span>TAKEDOWNS</span></div>` +
       list.map((r) => `<div class="rrow${r.isPlayer ? ' me' : ''}" style="--c:#${r.paint.toString(16).padStart(6, '0')}">
         <span class="p">${r.pos}</span><span class="n"><i></i>${r.name}</span><span>${r.car}</span>

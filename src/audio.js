@@ -3,6 +3,11 @@
 
 const midi = (n) => 440 * Math.pow(2, (n - 69) / 12);
 const RACE_CUTOFF = 4200; // music low-pass in races (the menus use 1400)
+// engine character per car style: pitch and how throaty the firing pulses are
+const ENGINE_TONE = {
+  wedge: { pitch: 1.0, burble: 0.35 }, gt: { pitch: 0.9, burble: 0.3 }, hatch: { pitch: 1.14, burble: 0.25 },
+  muscle: { pitch: 0.78, burble: 0.55 }, hyper: { pitch: 1.1, burble: 0.28 }, rally: { pitch: 1.05, burble: 0.4 },
+};
 
 // Each track: tempo, root note and four 7th chords (semitones from the root), one per bar.
 const SONGS = {
@@ -23,6 +28,13 @@ export class AudioEngine {
     this.musicOn = false;
     this.step = 0;
     this.nextTime = 0;
+    this.intensity = 0; // final lap: faster, busier music
+  }
+
+  setIntensity(k) {
+    if (k === this.intensity) return;
+    this.intensity = k;
+    if (k > 0) this.whoosh(true, 0.35);
   }
 
   // Must be called from a user gesture.
@@ -123,9 +135,22 @@ export class AudioEngine {
     const g3 = ctx.createGain(); g3.gain.value = 0.22;
     e.o1.connect(g1); e.o2.connect(g2); e.o3.connect(g3);
     g1.connect(e.shaper); g2.connect(e.shaper); g3.connect(e.shaper);
+    // sub an octave down for weight, and a slightly detuned saw for thickness
+    e.o4 = ctx.createOscillator(); e.o4.type = 'sine';
+    e.o5 = ctx.createOscillator(); e.o5.type = 'sawtooth'; e.o5.detune.value = 14;
+    const g4 = ctx.createGain(); g4.gain.value = 0.45;
+    const g5 = ctx.createGain(); g5.gain.value = 0.2;
+    e.o4.connect(g4); e.o5.connect(g5); g4.connect(e.shaper); g5.connect(e.shaper);
     e.shaper.connect(e.filter);
     e.filter.connect(e.filter2);
-    e.filter2.connect(e.gain);
+    // firing pulses: the level throbs at the firing rate, strongest at idle (the burble)
+    e.am = ctx.createGain(); e.am.gain.value = 0.7;
+    e.pulse = ctx.createOscillator(); e.pulse.type = 'sine';
+    e.pulseDepth = ctx.createGain(); e.pulseDepth.gain.value = 0.3;
+    e.pulse.connect(e.pulseDepth); e.pulseDepth.connect(e.am.gain);
+    e.filter2.connect(e.am);
+    e.am.connect(e.gain);
+    e.rev = 0.18; e.lastT = ctx.currentTime; e.lastGear = 1; e.lastThrottle = 0; e.crackleUntil = 0;
     e.gain.connect(this.sfx);
     // turbo / boost whine
     e.whine = ctx.createOscillator(); e.whine.type = 'sine';
@@ -151,7 +176,7 @@ export class AudioEngine {
     e.scrapeFilter = ctx.createBiquadFilter(); e.scrapeFilter.type = 'bandpass'; e.scrapeFilter.frequency.value = 600; e.scrapeFilter.Q.value = 0.9;
     e.scrapeGain = ctx.createGain(); e.scrapeGain.gain.value = 0;
     e.scrape.connect(e.scrapeFilter); e.scrapeFilter.connect(e.scrapeGain); e.scrapeGain.connect(this.sfx);
-    for (const n of [e.o1, e.o2, e.o3, e.whine, e.hiss, e.tyre, e.wind, e.scrape]) n.start();
+    for (const n of [e.o1, e.o2, e.o3, e.o4, e.o5, e.pulse, e.whine, e.hiss, e.tyre, e.wind, e.scrape]) n.start();
     return e;
   }
 
@@ -160,30 +185,56 @@ export class AudioEngine {
   }
 
   // Called every frame while a car is driven.
-  updateEngine({ speed, top, throttle, boost, slip, scraping, active, slowmo = 0, volume = 1 }, i = 0) {
+  updateEngine({ speed, top, throttle, boost, slip, scraping, active, slowmo = 0, volume = 1, style = 'wedge' }, i = 0) {
     const ratios = [0, 0.18, 0.32, 0.47, 0.62, 0.8, 1.05];
     let gear = 1;
     while (gear < 6 && speed > ratios[gear] * top) gear++;
     const lo = ratios[gear - 1] * top * 0.75, hi = ratios[gear] * top;
     let rpm = Math.max(0, Math.min(1, (speed - lo) / Math.max(1, hi - lo)));
     rpm = 0.25 + rpm * 0.75;
-    if (speed < 1) rpm = 0.18 + throttle * 0.35; // revving on the grid
-    this.state ||= [];
-    this.state[i] = { gear, rpm };
-    if (i === 0) { this.gear = gear; this.rpm = rpm; }
-    if (!this.ctx) return;
+    const onGrid = speed < 1;
+    if (onGrid) rpm = 0.16 + throttle * 0.8; // revving on the grid: all the way up to the limiter
+    if (!this.ctx) {
+      this.state ||= [];
+      this.state[i] = { gear, rpm };
+      return;
+    }
     if (!this.engines[i]) this.engines[i] = this.buildEngine();
     const e = this.engines[i], t = this.ctx.currentTime;
+    const dt = Math.min(0.1, Math.max(0.001, t - e.lastT));
+    e.lastT = t;
+    // revs have inertia: they climb quickly and fall back more slowly; bounce off the limiter
+    const tau = rpm > e.rev ? 0.09 : 0.3;
+    e.rev += (rpm - e.rev) * Math.min(1, dt / tau);
+    if (onGrid && e.rev > 0.93) e.rev -= 0.07 * Math.random();
+    this.state ||= [];
+    this.state[i] = { gear, rpm: e.rev };
+    if (i === 0) { this.gear = gear; this.rpm = e.rev; }
     active = active && volume > 0;
-    const pitch = 1 - slowmo * 0.45;
-    const f = (38 + rpm * 125) * pitch;
-    e.o1.frequency.setTargetAtTime(f, t, 0.03);
-    e.o2.frequency.setTargetAtTime(f * 0.5, t, 0.03);
-    e.o3.frequency.setTargetAtTime(f * 2, t, 0.03);
-    const cut = 260 + throttle * 700 + rpm * 1000 + boost * 500;
-    e.filter.frequency.setTargetAtTime(cut, t, 0.05);
-    e.filter2.frequency.setTargetAtTime(cut * 1.6, t, 0.05);
-    e.gain.gain.setTargetAtTime(active ? (0.11 + throttle * 0.08 + boost * 0.03) * volume : 0, t, 0.08);
+    const tone = ENGINE_TONE[style] || ENGINE_TONE.wedge;
+    const pitch = (1 - slowmo * 0.45) * tone.pitch;
+    const f = (36 + e.rev * 150) * pitch;
+    e.o1.frequency.setTargetAtTime(f, t, 0.02);
+    e.o5.frequency.setTargetAtTime(f, t, 0.02);
+    e.o2.frequency.setTargetAtTime(f * 0.5, t, 0.02);
+    e.o4.frequency.setTargetAtTime(f * 0.5, t, 0.02);
+    e.o3.frequency.setTargetAtTime(f * 2, t, 0.02);
+    e.pulse.frequency.setTargetAtTime(f * 0.5, t, 0.02);
+    e.pulseDepth.gain.setTargetAtTime(tone.burble * (1 - e.rev * 0.7) * (0.6 + throttle * 0.4), t, 0.05);
+    // the note opens up under load
+    const cut = 240 + throttle * 900 + e.rev * 1300 + boost * 500;
+    e.filter.frequency.setTargetAtTime(cut, t, 0.04);
+    e.filter2.frequency.setTargetAtTime(cut * 1.7, t, 0.04);
+    e.gain.gain.setTargetAtTime(active ? (0.1 + throttle * 0.1 + e.rev * 0.03 + boost * 0.03) * volume : 0, t, 0.06);
+    if (active && !onGrid) {
+      // gear change: a short dip and a thump
+      if (gear > e.lastGear) this.shiftThump(volume);
+      // lift off at high revs: exhaust crackle
+      if (e.lastThrottle > 0.5 && throttle < 0.2 && e.rev > 0.55) e.crackleUntil = t + 0.5 + Math.random() * 0.4;
+      if (t < e.crackleUntil && Math.random() < dt * 22) this.pop(volume * (0.6 + Math.random() * 0.4));
+    }
+    e.lastGear = gear;
+    e.lastThrottle = throttle;
     e.whine.frequency.setTargetAtTime(f * 5 + 300, t, 0.05);
     e.whineGain.gain.setTargetAtTime(active ? (boost * 0.014 + rpm * 0.002) * volume : 0, t, 0.1);
     e.hissGain.gain.setTargetAtTime(active ? boost * 0.045 * volume : 0, t, 0.08);
@@ -193,6 +244,28 @@ export class AudioEngine {
     e.windGain.gain.setTargetAtTime(active ? w * w * 0.08 * volume : 0, t, 0.1);
     e.windFilter.frequency.setTargetAtTime(280 + w * 1000, t, 0.1);
     e.scrapeGain.gain.setTargetAtTime(active ? scraping * 0.12 * volume : 0, t, 0.03);
+  }
+
+  shiftThump(vol = 1) {
+    const ctx = this.ctx, t = ctx.currentTime;
+    const o = ctx.createOscillator(); o.type = 'sine';
+    o.frequency.setValueAtTime(95, t); o.frequency.exponentialRampToValueAtTime(45, t + 0.12);
+    const g = ctx.createGain();
+    o.connect(g); g.connect(this.sfx);
+    this.env(g, t, 0.004, 0.16 * vol, 0.12);
+    o.start(t); o.stop(t + 0.2);
+    this.pop(vol * 0.7);
+  }
+
+  // one exhaust pop: a tiny filtered noise burst with a low body
+  pop(vol = 1) {
+    const ctx = this.ctx, t = ctx.currentTime;
+    const n = this.noise(false);
+    const f = ctx.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 700 + Math.random() * 900; f.Q.value = 1.2;
+    const g = ctx.createGain();
+    n.connect(f); f.connect(g); g.connect(this.sfx);
+    this.env(g, t, 0.002, 0.13 * vol, 0.05 + Math.random() * 0.04);
+    n.start(t, Math.random()); n.stop(t + 0.12);
   }
 
   silenceEngine() {
@@ -394,7 +467,7 @@ export class AudioEngine {
   // --- music ------------------------------------------------------------------
   schedule() {
     if (!this.ctx || !this.musicOn || this.ctx.state !== 'running') return;
-    const spb = 60 / this.song.bpm / 4; // 16th notes
+    const spb = 60 / (this.song.bpm * (1 + 0.06 * this.intensity)) / 4; // 16th notes
     if (this.nextTime < this.ctx.currentTime - 0.2) this.nextTime = this.ctx.currentTime + 0.05;
     while (this.nextTime < this.ctx.currentTime + 0.15) {
       this.playStep(this.step, this.nextTime, spb);
@@ -408,9 +481,12 @@ export class AudioEngine {
     const bar = Math.floor(step / 16) % 4;
     const i = step % 16;
     const chord = s.chords[bar];
-    const section = Math.floor(step / 64) % 4; // variation every 4 bars
+    const hot = this.intensity > 0;
+    const section = hot ? 3 : Math.floor(step / 64) % 4; // variation every 4 bars (final lap: full arrangement)
     if (i % 4 === 0) this.kick(t);
     if (i === 4 || i === 12) this.snare(t);
+    if (hot && bar === 3 && i >= 12) this.snare(t, 0.45 + (i - 12) * 0.15); // fill into each phrase
+    if (hot && i % 2 === 0 && i % 4 !== 0) this.hat(t, 0.028);
     if (i % 4 === 2 || (section > 1 && i % 2 === 1)) this.hat(t, i % 4 === 2 ? 0.035 : 0.018);
     // bass: 8ths, root with a fifth / octave now and then
     if (i % 2 === 0) this.bass(midi(s.root - 12 + chord[0] + (i === 6 ? 7 : i === 14 ? 12 : 0)), t, spb * 1.7);
@@ -433,13 +509,13 @@ export class AudioEngine {
     o.start(t); o.stop(t + 0.35);
   }
 
-  snare(t) {
+  snare(t, level = 1) {
     const ctx = this.ctx;
     const n = this.noise(false);
     const f = ctx.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 1800; f.Q.value = 0.7;
     const g = ctx.createGain();
     n.connect(f); f.connect(g); g.connect(this.musicFilter); g.connect(this.reverb);
-    this.env(g, t, 0.002, 0.2, 0.16);
+    this.env(g, t, 0.002, 0.2 * level, 0.16);
     n.start(t, Math.random()); n.stop(t + 0.25);
     const o = ctx.createOscillator(); o.type = 'triangle'; o.frequency.value = 190;
     const og = ctx.createGain();

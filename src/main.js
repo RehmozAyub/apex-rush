@@ -14,6 +14,8 @@ import { MAPS } from './maps/index.js';
 import { TrackPath } from './trackMath.js';
 import { CARS, PAINTS, QUALITY, QUALITY_ORDER, loadSettings, saveSettings } from './config.js';
 import { formatTime } from './race.js';
+import { recordRace, discoverSignature, unlockedPaints, unlockText, STARS } from './progress.js';
+import { SIGNATURE_KINDS } from './signatures.js';
 
 // setTimeout (not rAF) so loading also progresses when the window is hidden
 const IS_DESKTOP = /Electron/i.test(navigator.userAgent);
@@ -89,7 +91,7 @@ class Game {
     const w = MAPS[i].weather;
     this.audio.setAmbience(w ? (w.type === 'rain' ? 'rain' : 'wind') : null);
     this.renderer.setScene(world.scene, { bloom: MAPS[i].bloom, exposure: MAPS[i].exposure });
-    for (const m of this.minimaps) m.setTrack(world.track, MAPS[i].trackStyle.accent);
+    for (const m of this.minimaps) m.setTrack(world.track, MAPS[i].trackStyle.accent, world.shortcut);
     this.buildShowroom();
     this.world.update(0, 0, this.showroomCar, this.renderer.camera);
     this.renderer.renderer.compile(world.scene, this.renderer.camera);
@@ -104,7 +106,7 @@ class Game {
     const p = t.pointAt(t.length - 40, 0);
     const pick = this.pickSel();
     const car = CARS[pick.car];
-    const model = buildCar(car.style, PAINTS[pick.paint].hex, { underglow: this.world.def.underglow ? PAINTS[pick.paint].hex : null, number: this.carPick + 1 });
+    const model = buildCar(car.style, PAINTS[pick.paint].hex, { underglow: this.world.def.underglow ? PAINTS[pick.paint].hex : null, number: this.carPick + 1, finish: PAINTS[pick.paint].finish });
     model.root.position.set(p.x, p.y, p.z);
     model.root.rotation.y = p.heading;
     for (const w of model.wheels) if (w.front) w.group.rotation.y = -0.35;
@@ -127,7 +129,7 @@ class Game {
     this.minimaps = this.ui.setViews(n).map((c) => new Minimap(c));
     if (this.world) {
       this.world.setViewCount(n);
-      for (const m of this.minimaps) m.setTrack(this.world.track, this.world.def.trackStyle.accent);
+      for (const m of this.minimaps) m.setTrack(this.world.track, this.world.def.trackStyle.accent, this.world.shortcut);
     }
     this.renderer.onView = n > 1 ? (i) => {
       const H = this.session && this.session.humans[i];
@@ -138,6 +140,34 @@ class Game {
   }
 
   pickSel() { return this.carPick === 1 ? this.sel2 : this.sel; }
+
+  // --- progress: stars, signature takedowns, earned paints ------------------------------
+  trackProgress() {
+    const P = this.settings.progress;
+    return MAPS.map((m) => ({ stars: P.stars[m.id] || [false, false, false], sigs: (P.signatures[m.id] || []).length, sigTotal: SIGNATURE_KINDS.length }));
+  }
+
+  paintOpen() { return unlockedPaints(this.settings.progress, PAINTS); }
+
+  // a player scored a signature takedown; the first time, snap a photo of the crash
+  onSignature(i, sig, mapId) {
+    if (!discoverSignature(this.settings.progress, mapId, sig.id)) return;
+    saveSettings(this.settings);
+    const found = this.settings.progress.signatures[mapId].length;
+    this.pendingShot = { i, sig, found, t: 0.55 };
+  }
+
+  // copy player i's part of the frame that was just rendered into a small JPEG
+  captureView(i) {
+    const src = this.renderer.renderer.domElement;
+    const n = this.renderer.viewCount;
+    const sw = src.width, sh = src.height / n;
+    const c = this.shotCanvas || (this.shotCanvas = document.createElement('canvas'));
+    c.width = 480;
+    c.height = Math.round((480 * sh) / sw);
+    c.getContext('2d').drawImage(src, 0, i * sh, sw, sh, 0, 0, c.width, c.height);
+    return c.toDataURL('image/jpeg', 0.85);
+  }
 
   // --- screens ------------------------------------------------------------------
   // the map on screen (menus) - RANDOM keeps whatever is loaded
@@ -170,7 +200,7 @@ class Game {
   showTracks() {
     this.state = 'tracks';
     this.ui.show('tracks');
-    this.ui.trackCards(MAPS, this.sel.track, this.trackLengths);
+    this.ui.trackCards(MAPS, this.sel.track, this.trackLengths, this.trackProgress());
   }
 
   showCars(pick = 0) {
@@ -310,6 +340,7 @@ class Game {
   }
 
   endSession() {
+    this.pendingShot = null;
     if (!this.session) return;
     this.session.dispose();
     this.session = null;
@@ -347,7 +378,24 @@ class Game {
       head = me.pos === 1 ? '<b>VICTORY</b>' : `<b>P${me.pos}</b> FINISH`;
       tds = `${this.session.takedowns} TAKEDOWNS`;
     }
-    this.ui.results(list, `${head} <small style="font-size:3vh;opacity:.8">&nbsp; ${tds}</small>${record}`);
+    // stars and earned paints
+    const extras = [];
+    for (const st of this.session.humanStats()) {
+      if (!st.finished) { this.settings.progress.totalTakedowns += st.takedowns; continue; }
+      const got = recordRace(this.settings.progress, key, st, PAINTS);
+      const who = this.players > 1 ? `P${st.index + 1} ` : '';
+      for (const k of got.stars) extras.push(`★ ${who}${STARS[k].name}`);
+      for (const p of got.paints) extras.push(`NEW PAINT: ${p.name.toUpperCase()}`);
+    }
+    saveSettings(this.settings);
+    // replay the best takedown behind the results
+    const clip = this.session.startReplay();
+    if (clip) {
+      if (this.players > 1) this.setViews(1);
+      this.ui.overlay('hud', false);
+    }
+    const replay = clip ? `${clip.label !== 'TAKEDOWN' ? clip.label + ' · ' : ''}${clip.name}` : '';
+    this.ui.results(list, `${head} <small style="font-size:3vh;opacity:.8">&nbsp; ${tds}</small>${record}`, extras, replay);
     this.state = 'results';
     this.menuIndex.results = 1; // NEXT TRACK is the default
     this.ui.show('results');
@@ -370,7 +418,7 @@ class Game {
         else if (t === n) this.sel.track = a === 'up' ? n - 2 : 1;
         else if (a === 'down') this.sel.track = t + 3 < n ? t + 3 : n;
         else this.sel.track = t - 3 >= 0 ? t - 3 : n;
-        this.ui.trackCards(MAPS, this.sel.track, this.trackLengths);
+        this.ui.trackCards(MAPS, this.sel.track, this.trackLengths, this.trackProgress());
         this.audio.blip(600, 0.03, 0.06);
         this.previewTrack();
       }
@@ -379,7 +427,13 @@ class Game {
     } else if (st === 'cars') {
       const pick = this.pickSel();
       if (a === 'left' || a === 'right') { pick.car = (pick.car + (a === 'left' ? -1 : 1) + CARS.length) % CARS.length; this.refreshCar(); }
-      if (a === 'up' || a === 'down') { pick.paint = (pick.paint + (a === 'up' ? -1 : 1) + PAINTS.length) % PAINTS.length; this.refreshCar(); }
+      if (a === 'up' || a === 'down') {
+        const open = this.paintOpen();
+        let p = pick.paint;
+        do p = (p + (a === 'up' ? -1 : 1) + PAINTS.length) % PAINTS.length; while (!open[p]);
+        pick.paint = p;
+        this.refreshCar();
+      }
       if (a === 'confirm' && code !== 'Space') this.confirmCar();
       if (a === 'back') { if (this.carPick === 1) this.showCars(0); else this.showTracks(); }
     } else if (st === 'howto') {
@@ -466,7 +520,8 @@ class Game {
     if (sound) this.audio.blip(600, 0.03, 0.06);
     const pick = this.pickSel();
     const who = this.players > 1 ? `PLAYER ${this.carPick + 1}` : '';
-    this.ui.carPanel(CARS[pick.car], PAINTS, pick.paint, pick.car, CARS.length, who);
+    if (!this.paintOpen()[pick.paint]) pick.paint = 0;
+    this.ui.carPanel(CARS[pick.car], PAINTS, pick.paint, pick.car, CARS.length, who, this.paintOpen(), unlockText);
     if (this.world) this.buildShowroom();
   }
 
@@ -483,11 +538,15 @@ class Game {
       if (!c) return;
       const i = Number(c.dataset.i);
       if (i === this.sel.track) this.showCars();
-      else { this.sel.track = i; this.ui.trackCards(MAPS, i, this.trackLengths); this.previewTrack(); }
+      else { this.sel.track = i; this.ui.trackCards(MAPS, i, this.trackLengths, this.trackProgress()); this.previewTrack(); }
     });
     document.getElementById('swatches').addEventListener('click', (e) => {
       const s = e.target.closest('i');
-      if (s) { this.pickSel().paint = Number(s.dataset.i); this.refreshCar(); }
+      if (!s) return;
+      const i = Number(s.dataset.i);
+      if (!this.paintOpen()[i]) { document.getElementById('paintname').textContent = `LOCKED · ${unlockText(PAINTS[i])}`; this.audio.blip(300, 0.06, 0.08); return; }
+      this.pickSel().paint = i;
+      this.refreshCar();
     });
     for (const [k, d] of [[0, -1], [1, 1]]) {
       document.querySelectorAll('.carnav .arrow')[k].addEventListener('click', () => { const p = this.pickSel(); p.car = (p.car + d + CARS.length) % CARS.length; this.refreshCar(); });
@@ -501,7 +560,8 @@ class Game {
     if (this.session) this.session.autopilot = controls === 'auto';
     this.input.override = controls === 'auto' ? null : controls;
     for (let i = 0; i < frames; i++) {
-      if (this.session && (this.state === 'race' || this.state === 'results')) this.session.update(dt);
+      if (this.session && this.session.replaying) this.session.updateReplay(dt);
+      else if (this.session && (this.state === 'race' || this.state === 'results')) this.session.update(dt);
     }
     this.input.override = null;
     this.renderer.render(this.time);
@@ -526,7 +586,8 @@ class Game {
     } else if (this.session && (this.state === 'pause' || (this.state === 'settings' && this.settingsFrom === 'pause'))) {
       // frozen
     } else if (this.session && this.state === 'results') {
-      this.session.update(realDt);
+      if (this.session.replaying) this.session.updateReplay(realDt);
+      else this.session.update(realDt);
     } else if (this.world && this.showroomCar) {
       this.rig.updateOrbit(realDt, this.showroomCar, this.time);
       this.world.update(realDt, this.time, this.showroomCar, cam);
@@ -536,6 +597,12 @@ class Game {
     for (const fx of this.renderer.fxs) fx.weather = this.world ? this.world.flash : 0;
     if (this.session) this.session.fx.setScale(this.renderer.height / (2 * Math.tan((cam.fov * Math.PI) / 360)));
     this.renderer.render(this.time);
+    const shot = this.pendingShot;
+    if (shot && this.state === 'race' && (shot.t -= realDt) <= 0) {
+      this.pendingShot = null;
+      this.ui.signatureCard(shot.i, this.captureView(shot.i), shot.sig.name, shot.sig.line, shot.found, SIGNATURE_KINDS.length);
+      this.audio.chime(5);
+    }
   }
 
   // drop graphics quality automatically if the frame rate stays low

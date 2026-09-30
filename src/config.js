@@ -41,7 +41,17 @@ export const PAINTS = [
   { name: 'Ultra', hex: 0x6a2cff },
   { name: 'Pearl', hex: 0xeef0f2 },
   { name: 'Carbon', hex: 0x16181c },
+  // earned paints: lifetime takedowns or stars
+  { name: 'Sunburst', hex: 0xffb000, unlock: { takedowns: 10 } },
+  { name: 'Toxic', hex: 0x9dff00, unlock: { takedowns: 25 } },
+  { name: 'Sakura', hex: 0xff8fc4, unlock: { takedowns: 40 } },
+  { name: 'Midnight', hex: 0x1b2d7a, unlock: { takedowns: 60 } },
+  { name: 'Copper', hex: 0xb5652b, unlock: { takedowns: 80 }, finish: 'metal' },
+  { name: 'Glacier', hex: 0x8fe3ff, unlock: { takedowns: 100 } },
+  { name: 'Chrome', hex: 0xd9dee6, unlock: { stars: 6 }, finish: 'chrome' },
+  { name: 'Gold', hex: 0xd4a32a, unlock: { stars: 12 }, finish: 'chrome' },
 ];
+export const BASE_PAINTS = PAINTS.filter((p) => !p.unlock).length; // AI rivals only use these
 
 export const AI_NAMES = ['VORTEX', 'KAZE', 'NOVA', 'RAZOR', 'HAVOC', 'STRYKER', 'ONYX', 'BLITZ', 'VIXEN', 'DIESEL'];
 
@@ -58,10 +68,11 @@ export const BOOST_SPEED = 1.32;
 export const BOOST_ACCEL = 1.7;
 
 export function loadSettings() {
-  const def = { quality: 'high', motionBlur: true, master: 0.8, music: 0.55, assist: true, assist2: true, bestLaps: {} };
+  const def = { quality: 'high', motionBlur: true, master: 0.8, music: 0.55, assist: true, assist2: true, bestLaps: {}, progress: { stars: {}, signatures: {}, totalTakedowns: 0 } };
   try {
     const s = JSON.parse(localStorage.getItem('apexrush.settings') || '{}');
-    return { ...def, ...s, bestLaps: { ...(s.bestLaps || {}) } };
+    const p = s.progress || {};
+    return { ...def, ...s, bestLaps: { ...(s.bestLaps || {}) }, progress: { stars: { ...(p.stars || {}) }, signatures: { ...(p.signatures || {}) }, totalTakedowns: p.totalTakedowns || 0 } };
   } catch {
     return def;
   }

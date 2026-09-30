@@ -1,16 +1,19 @@
 // Builds the visible track from a TrackPath: road, kerbs, barriers (with optional neon strip),
-// embankments, start line and gantry.
+// embankments, start line and gantry - plus the shortcut (its own dirt road and barriers, with
+// gaps in the main barrier where it forks off and merges back).
 import * as THREE from 'three';
 import { checkerTexture, kerbTexture, textTexture } from './textures.js';
 import { addWorldDetail } from './detail.js';
 
 // Ribbon along the track between two (lateral, height) profiles.
-function ribbon(track, a, b, { vScale = 1 / 40, uFrom = 0, uTo = 1, yOff = 0 } = {}) {
+// closed: loop back to the start (main road); keep(i): leave out segments touching sample i.
+function ribbon(track, a, b, { vScale = 1 / 40, uFrom = 0, uTo = 1, yOff = 0, closed = true, keep = null } = {}) {
   const n = track.n;
-  const pos = new Float32Array((n + 1) * 2 * 3);
-  const uv = new Float32Array((n + 1) * 2 * 2);
+  const last = closed ? n : n - 1;
+  const pos = new Float32Array((last + 1) * 2 * 3);
+  const uv = new Float32Array((last + 1) * 2 * 2);
   const idx = [];
-  for (let i = 0; i <= n; i++) {
+  for (let i = 0; i <= last; i++) {
     const k = i % n;
     const s = i * track.step;
     for (let j = 0; j < 2; j++) {
@@ -22,7 +25,7 @@ function ribbon(track, a, b, { vScale = 1 / 40, uFrom = 0, uTo = 1, yOff = 0 } =
       uv[(i * 2 + j) * 2] = j === 0 ? uFrom : uTo;
       uv[(i * 2 + j) * 2 + 1] = s * vScale;
     }
-    if (i < n) {
+    if (i < last && (!keep || (keep(k) && keep((i + 1) % n)))) {
       const p = i * 2;
       idx.push(p, p + 2, p + 1, p + 1, p + 2, p + 3);
     }
@@ -49,9 +52,11 @@ function fixWinding(g, wantUp) {
 }
 
 // asphalt: { map, normalMap, roughnessMap } from getAsphalt()
-export function buildTrackMeshes(track, style, maxAniso, asphalt) {
+export function buildTrackMeshes(track, style, maxAniso, asphalt, shortcut = null) {
   const group = new THREE.Group();
   const hw = track.halfWidth;
+  // per side: which main-road samples keep their roadside (no gap for the shortcut)
+  const sideKeep = (side) => (shortcut && shortcut.side === side ? (i) => !shortcut.mainGap[i] : null);
 
   // Road: procedural asphalt (albedo + normal + roughness) plus world-space grit and tone variation
   const at = asphalt;
@@ -75,7 +80,7 @@ export function buildTrackMeshes(track, style, maxAniso, asphalt) {
   const shoulderMat = addWorldDetail(new THREE.MeshStandardMaterial({ color: style.shoulder ?? 0x3a3835, roughness: 0.95 }), { fine: [2.2, 0.7], macro: [0.05, 0.35], rough: 0.1 });
   for (const side of [-1, 1]) {
     const a = [side * hw, -0.01], b = [side * (hw + 2.2), -0.05];
-    const g = fixWinding(ribbon(track, side < 0 ? b : a, side < 0 ? a : b), true);
+    const g = fixWinding(ribbon(track, side < 0 ? b : a, side < 0 ? a : b, { keep: sideKeep(side) }), true);
     const m = new THREE.Mesh(g, shoulderMat);
     m.receiveShadow = true;
     group.add(m);
@@ -87,7 +92,7 @@ export function buildTrackMeshes(track, style, maxAniso, asphalt) {
     const kMat = new THREE.MeshStandardMaterial({ map: kt, roughness: 0.6 });
     for (const side of [-1, 1]) {
       const a = [side * (hw - 1.1), 0.03], b = [side * (hw + 0.2), 0.08];
-      const g = fixWinding(ribbon(track, side < 0 ? b : a, side < 0 ? a : b, { vScale: 1 / 6 }), true);
+      const g = fixWinding(ribbon(track, side < 0 ? b : a, side < 0 ? a : b, { vScale: 1 / 6, keep: sideKeep(side) }), true);
       const m = new THREE.Mesh(g, kMat);
       m.receiveShadow = true;
       group.add(m);
@@ -99,7 +104,7 @@ export function buildTrackMeshes(track, style, maxAniso, asphalt) {
     const eMat = addWorldDetail(new THREE.MeshStandardMaterial({ color: style.embankment, roughness: 1 }), { fine: [0.45, 0.45], macro: [0.03, 0.35], rough: 0 });
     for (const side of [-1, 1]) {
       const a = [side * (hw + 2.2), -0.05], b = [side * (hw + 14), -7];
-      const g = fixWinding(ribbon(track, side < 0 ? b : a, side < 0 ? a : b), true);
+      const g = fixWinding(ribbon(track, side < 0 ? b : a, side < 0 ? a : b, { keep: sideKeep(side) }), true);
       const m = new THREE.Mesh(g, eMat);
       m.receiveShadow = true;
       group.add(m);
@@ -107,59 +112,9 @@ export function buildTrackMeshes(track, style, maxAniso, asphalt) {
   }
 
   // Barriers
-  const bs = style.barrier;
-  const wallOff = hw + 0.5;
-  if (bs.type === 'wall') {
-    const wMat = addWorldDetail(new THREE.MeshStandardMaterial({ color: bs.color, roughness: 0.8, metalness: 0.05 }), { fine: [1.2, 0.35], macro: [0.04, 0.25], rough: 0.2, triplanar: true });
-    for (const side of [-1, 1]) {
-      // inner face, top, outer face
-      const inner = ribbon(track, [side * wallOff, 0], [side * wallOff, bs.height]);
-      const top = ribbon(track, [side * wallOff, bs.height], [side * (wallOff + 0.6), bs.height]);
-      const outer = ribbon(track, [side * (wallOff + 0.6), bs.height], [side * (wallOff + 0.6), -4]);
-      for (const g of [inner, top, outer]) {
-        const m = new THREE.Mesh(g, wMat);
-        m.material.side = THREE.DoubleSide;
-        m.castShadow = true;
-        m.receiveShadow = true;
-        group.add(m);
-      }
-    }
-  } else {
-    // guardrail: metal band on posts
-    const railMat = new THREE.MeshStandardMaterial({ color: bs.color, roughness: 0.6, metalness: 0.45, envMapIntensity: 0.6, side: THREE.DoubleSide });
-    const postMat = new THREE.MeshStandardMaterial({ color: bs.postColor ?? 0x555555, roughness: 0.7, metalness: 0.4 });
-    for (const side of [-1, 1]) {
-      const g = ribbon(track, [side * wallOff, 0.45], [side * wallOff, 0.95]);
-      const m = new THREE.Mesh(g, railMat);
-      m.castShadow = true;
-      group.add(m);
-    }
-    const every = Math.max(1, Math.round(4 / track.step));
-    const count = Math.ceil(track.n / every) * 2;
-    const posts = new THREE.InstancedMesh(new THREE.BoxGeometry(0.14, 1.0, 0.14), postMat, count);
-    const mtx = new THREE.Matrix4();
-    let c = 0;
-    for (let i = 0; i < track.n; i += every) {
-      for (const side of [-1, 1]) {
-        mtx.makeTranslation(track.x[i] + track.rx[i] * side * (wallOff + 0.12), track.y[i] + 0.5, track.z[i] + track.rz[i] * side * (wallOff + 0.12));
-        posts.setMatrixAt(c++, mtx);
-      }
-    }
-    posts.count = c;
-    posts.castShadow = true;
-    group.add(posts);
-  }
+  addBarriers(group, track, style.barrier, hw + 0.5, sideKeep, true);
 
-  // Glowing strip along the barrier top (neon / reflectors)
-  if (bs.glow) {
-    for (const side of [-1, 1]) {
-      const h = bs.type === 'wall' ? bs.height + 0.02 : 1.0;
-      const g = ribbon(track, [side * (wallOff + 0.05), h], [side * (wallOff + 0.05), h + 0.12]);
-      const col = new THREE.Color(side < 0 ? bs.glow[0] : bs.glow[1] ?? bs.glow[0]);
-      const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: col.multiplyScalar(bs.glowIntensity ?? 4), side: THREE.DoubleSide, toneMapped: true }));
-      group.add(m);
-    }
-  }
+  if (shortcut) group.add(buildShortcut(shortcut, style));
 
   // Start / finish
   const p0 = track.pointAt(0, 0);
@@ -202,5 +157,113 @@ export function buildTrackMeshes(track, style, maxAniso, asphalt) {
   gantry.rotation.y = head;
   group.add(gantry);
 
+  return group;
+}
+
+// Barriers along both sides of a path. keepFor(side) -> null (all) or a sample filter.
+function addBarriers(group, track, bs, wallOff, keepFor, closed) {
+  const opt = (side, extra = {}) => ({ closed, keep: keepFor(side), ...extra });
+  if (bs.type === 'wall') {
+    const wMat = addWorldDetail(new THREE.MeshStandardMaterial({ color: bs.color, roughness: 0.8, metalness: 0.05, side: THREE.DoubleSide }), { fine: [1.2, 0.35], macro: [0.04, 0.25], rough: 0.2, triplanar: true });
+    for (const side of [-1, 1]) {
+      // inner face, top, outer face
+      const inner = ribbon(track, [side * wallOff, 0], [side * wallOff, bs.height], opt(side));
+      const top = ribbon(track, [side * wallOff, bs.height], [side * (wallOff + 0.6), bs.height], opt(side));
+      const outer = ribbon(track, [side * (wallOff + 0.6), bs.height], [side * (wallOff + 0.6), -4], opt(side));
+      for (const g of [inner, top, outer]) {
+        const m = new THREE.Mesh(g, wMat);
+        m.castShadow = true;
+        m.receiveShadow = true;
+        group.add(m);
+      }
+    }
+  } else {
+    // guardrail: metal band on posts
+    const railMat = new THREE.MeshStandardMaterial({ color: bs.color, roughness: 0.6, metalness: 0.45, envMapIntensity: 0.6, side: THREE.DoubleSide });
+    const postMat = new THREE.MeshStandardMaterial({ color: bs.postColor ?? 0x555555, roughness: 0.7, metalness: 0.4 });
+    for (const side of [-1, 1]) {
+      const m = new THREE.Mesh(ribbon(track, [side * wallOff, 0.45], [side * wallOff, 0.95], opt(side)), railMat);
+      m.castShadow = true;
+      group.add(m);
+    }
+    const every = Math.max(1, Math.round(4 / track.step));
+    const count = Math.ceil(track.n / every) * 2;
+    const posts = new THREE.InstancedMesh(new THREE.BoxGeometry(0.14, 1.0, 0.14), postMat, count);
+    const mtx = new THREE.Matrix4();
+    let c = 0;
+    for (let i = 0; i < track.n; i += every) {
+      for (const side of [-1, 1]) {
+        const keep = keepFor(side);
+        if (keep && !keep(i)) continue;
+        mtx.makeTranslation(track.x[i] + track.rx[i] * side * (wallOff + 0.12), track.y[i] + 0.5, track.z[i] + track.rz[i] * side * (wallOff + 0.12));
+        posts.setMatrixAt(c++, mtx);
+      }
+    }
+    posts.count = c;
+    posts.castShadow = true;
+    group.add(posts);
+  }
+
+  // Glowing strip along the barrier top (neon / reflectors)
+  if (bs.glow) {
+    for (const side of [-1, 1]) {
+      const h = bs.type === 'wall' ? bs.height + 0.02 : 1.0;
+      const g = ribbon(track, [side * (wallOff + 0.05), h], [side * (wallOff + 0.05), h + 0.12], opt(side));
+      const col = new THREE.Color(side < 0 ? bs.glow[0] : bs.glow[1] ?? bs.glow[0]);
+      group.add(new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: col.multiplyScalar(bs.glowIntensity ?? 4), side: THREE.DoubleSide, toneMapped: true })));
+    }
+  }
+}
+
+// The shortcut: a narrow dirt (or style-coloured) road with shoulders, embankments, barriers
+// and a sign at the fork.
+function buildShortcut(sc, style) {
+  const group = new THREE.Group();
+  const path = sc.path, shw = path.halfWidth;
+  const cfg = style.shortcut || {};
+  const keepFor = (side) => { const g = sc.pathGap[side < 0 ? 0 : 1]; return (j) => !g[j]; };
+  // drawn behind the main road where the two overlap at the fork and the merge
+  const dirt = addWorldDetail(new THREE.MeshStandardMaterial({ color: cfg.color ?? 0x6e5a44, roughness: 1, polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 2 }), { fine: [1.8, 0.55], macro: [0.03, 0.35], rough: 0.05 });
+  const road = new THREE.Mesh(fixWinding(ribbon(path, [-shw, -0.03], [shw, -0.03], { closed: false }), true), dirt);
+  road.receiveShadow = true;
+  group.add(road);
+  // wheel ruts
+  const rut = new THREE.MeshStandardMaterial({ color: new THREE.Color(cfg.color ?? 0x6e5a44).multiplyScalar(0.6), roughness: 1, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 });
+  for (const lat of [-2.2, 2.2]) {
+    const m = new THREE.Mesh(fixWinding(ribbon(path, [lat - 0.45, -0.02], [lat + 0.45, -0.02], { closed: false }), true), rut);
+    m.receiveShadow = true;
+    group.add(m);
+  }
+  const shoulderMat = addWorldDetail(new THREE.MeshStandardMaterial({ color: style.shoulder ?? 0x3a3835, roughness: 0.95 }), { fine: [2.2, 0.7], macro: [0.05, 0.35], rough: 0.1 });
+  const eMat = addWorldDetail(new THREE.MeshStandardMaterial({ color: style.embankment ?? 0x4a4a40, roughness: 1 }), { fine: [0.45, 0.45], macro: [0.03, 0.35], rough: 0 });
+  for (const side of [-1, 1]) {
+    const keep = keepFor(side);
+    const a = [side * shw, -0.04], b = [side * (shw + 2), -0.07];
+    group.add(new THREE.Mesh(fixWinding(ribbon(path, side < 0 ? b : a, side < 0 ? a : b, { closed: false, keep }), true), shoulderMat));
+    const c = [side * (shw + 2), -0.07], d = [side * (shw + 12), -6];
+    const e = new THREE.Mesh(fixWinding(ribbon(path, side < 0 ? d : c, side < 0 ? c : d, { closed: false, keep }), true), eMat);
+    e.receiveShadow = true;
+    group.add(e);
+  }
+  addBarriers(group, path, style.barrier, shw + 0.5, keepFor, false);
+
+  // sign at the fork
+  const u = Math.min(path.length * 0.3, sc.overlapIn + 10);
+  const p = path.pointAt(u, -sc.side * (shw + 1.8));
+  const sign = new THREE.Group();
+  const board = new THREE.Mesh(new THREE.PlaneGeometry(4.2, 1.05), new THREE.MeshBasicMaterial({ map: textTexture('SHORTCUT ›', { accent: style.accent ?? '#ff2d55', font: 'italic 900 140px Bahnschrift, "Segoe UI", sans-serif' }), toneMapped: false, side: THREE.DoubleSide }));
+  board.position.y = 2.4;
+  sign.add(board);
+  const postMat = new THREE.MeshStandardMaterial({ color: 0x222226, roughness: 0.6, metalness: 0.5 });
+  for (const sx of [-1.7, 1.7]) {
+    const post = new THREE.Mesh(new THREE.BoxGeometry(0.12, 2.4, 0.12), postMat);
+    post.position.set(sx, 1.2, -0.05);
+    sign.add(post);
+  }
+  sign.position.set(p.x, p.y, p.z);
+  // face back toward oncoming cars on the main road
+  const back = sc.track.pointAt(sc.a - 60, 0);
+  sign.rotation.y = Math.atan2(back.x - p.x, back.z - p.z);
+  group.add(sign);
   return group;
 }

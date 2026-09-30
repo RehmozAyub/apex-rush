@@ -75,6 +75,7 @@ export default {
     barrier: { type: 'guardrail', color: 0xd8dde4 },
     embankment: 0x7a6a4a,
     shoulder: 0x5a5046,
+    shortcut: { color: 0x8f7a5e },
     accent: '#ff5a2d',
   },
 
@@ -169,6 +170,7 @@ export default {
       lh.position.set(best.x, y0, best.z);
       scene.add(lh);
     }
+    const landmark = best ? { s: [track.project(best.x, best.z).s], range: 80 } : null; // the lighthouse
 
     // sailboats
     const boats = [];
@@ -198,6 +200,7 @@ export default {
     envScene.add(envGround);
 
     return {
+      landmark,
       update(dt, time) {
         ocean.material.uniforms.uTime.value = time;
         for (const b of beams) b.rotation.y = time * 0.9;

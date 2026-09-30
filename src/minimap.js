@@ -6,7 +6,7 @@ export class Minimap {
     this.bg = document.createElement('canvas');
   }
 
-  setTrack(track, accent = '#ff2d55') {
+  setTrack(track, accent = '#ff2d55', shortcut = null) {
     const size = this.canvas.width;
     this.bg.width = this.bg.height = size;
     let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
@@ -32,6 +32,16 @@ export class Minimap {
     g.lineJoin = 'round';
     path(); g.strokeStyle = 'rgba(0,0,0,0.55)'; g.lineWidth = 9; g.stroke();
     path(); g.strokeStyle = 'rgba(255,255,255,0.85)'; g.lineWidth = 4; g.stroke();
+    // shortcut: dashed
+    if (shortcut) {
+      const p = shortcut.path;
+      g.setLineDash([5, 4]);
+      g.beginPath();
+      for (let i = 0; i < p.n; i += 2) { const [px, py] = this.map(p.x[i], p.z[i]); if (i === 0) g.moveTo(px, py); else g.lineTo(px, py); }
+      g.strokeStyle = 'rgba(0,0,0,0.55)'; g.lineWidth = 6; g.stroke();
+      g.strokeStyle = 'rgba(255,255,255,0.7)'; g.lineWidth = 2.5; g.stroke();
+      g.setLineDash([]);
+    }
     // start line
     const [sx, sy] = this.map(track.x[0], track.z[0]);
     g.fillStyle = accent;
@@ -44,7 +54,7 @@ export class Minimap {
     return [this.canvas.width - (x * this.scale + this.ox), this.canvas.height - (z * this.scale + this.oz)];
   }
 
-  draw(cars, player) {
+  draw(cars, player, rival = null) {
     const g = this.ctx, size = this.canvas.width;
     g.clearRect(0, 0, size, size);
     g.drawImage(this.bg, 0, 0);
@@ -56,6 +66,7 @@ export class Minimap {
       g.fillStyle = c.vehicle.wrecked ? '#555' : '#' + c.paint.toString(16).padStart(6, '0');
       g.fill();
       g.lineWidth = c.isPlayer ? 2.5 : 1.5; g.strokeStyle = c.isPlayer ? '#fff' : '#000'; g.stroke();
+      if (c === rival) { g.beginPath(); g.arc(px, py, 8, 0, Math.PI * 2); g.lineWidth = 2.5; g.strokeStyle = '#ff2d40'; g.stroke(); }
     }
     const v = player.vehicle;
     const [px, py] = this.map(v.x, v.z);

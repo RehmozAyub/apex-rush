@@ -43,6 +43,7 @@ export class Vehicle {
     this.yawRate = 0; this.steer = 0;
     this.drifting = false;
     this.wrecked = false;
+    this.onSC = false; // on the shortcut (see RaceSession.constrainCar)
     this.idx = p.idx;
     this.bodyPitch = this.bodyRoll = 0;
     this.constrain(track);
