@@ -168,6 +168,7 @@ body.menu-cursor #ui .screen.show { pointer-events: auto; }
 .h-center { position: absolute; top: 17vh; left: 0; right: 0; text-align: center; }
 .h-banner { display: inline-block; font-size: 3vh; letter-spacing: 0.4em; padding: 0.6vh 3vh; opacity: 0; transform: skewX(-14deg); background: rgba(25, 227, 255, 0.85); color: #001; font-variation-settings: 'wdth' 75, 'wght' 700; transition: opacity 0.2s; }
 .h-banner.show { opacity: 1; }
+.h-banner.hot { background: var(--grad); color: #fff; animation: blink 0.7s infinite; }
 .h-banner.bad { background: rgba(255, 30, 50, 0.9); color: #fff; animation: blink 0.6s infinite; }
 
 .popups { position: absolute; top: 25vh; left: 0; right: 0; display: flex; flex-direction: column; align-items: center; gap: 0.8vh; }
@@ -234,7 +235,7 @@ body.menu-cursor #ui .screen.show { pointer-events: auto; }
 .spd small { font-size: 1.6vh; letter-spacing: 0.3em; opacity: 0.75; font-style: normal; }
 .gear { position: absolute; left: 0; right: 0; bottom: 12%; text-align: center; font-size: 1.6vh; letter-spacing: 0.2em; opacity: 0.8; font-style: normal; }
 .gear b { font-size: 2.6vh; color: var(--yellow); }
-.hudview.crashcam .hudinner > :not(.popups):not(.h-center) { opacity: 0; transition: opacity 0.2s; }
+.hudview.crashcam .hudinner > :not(.popups):not(.h-center):not(.sigcards) { opacity: 0; transition: opacity 0.2s; }
 .hudinner > * { transition: opacity 0.3s; }
 
 /* ---------- HUD views / split screen ---------- */
@@ -284,3 +285,35 @@ body.menu-cursor #ui .screen.show { pointer-events: auto; }
 #s-pause .menu { position: absolute; left: 6vw; top: 22vh; }
 
 .err { position: absolute; left: 6vw; top: 22vh; max-width: 70vh; font-size: 2.4vh; line-height: 1.5; }
+
+/* ---------- signature takedown snapshot ---------- */
+.sigcards { position: absolute; right: 3vw; top: 16vh; width: 40vh; pointer-events: none; }
+.sigcard { background: #f4f1ea; color: #111; padding: 1.2vh 1.2vh 1.6vh; transform: rotate(3deg); box-shadow: 0 1.5vh 4vh rgba(0,0,0,0.55); animation: sigIn 0.45s cubic-bezier(.2,1.4,.3,1) both; transition: opacity 0.5s, transform 0.5s; }
+.sigcard.out { opacity: 0; transform: rotate(8deg) translateX(8vh); }
+.sigcard .sc-head { font-size: 1.6vh; letter-spacing: 0.3em; font-variation-settings: 'wdth' 75, 'wght' 700; color: #d0102e; display: flex; justify-content: space-between; margin-bottom: 0.8vh; }
+.sigcard .sc-head em { font-style: normal; color: #555; letter-spacing: 0.1em; }
+.sigcard .sc-photo { height: 22vh; background: #222 center / cover no-repeat; filter: contrast(1.1) saturate(1.15); }
+.sigcard .sc-name { font-size: 3.4vh; font-style: italic; font-variation-settings: 'wdth' 75, 'wght' 800; margin-top: 1vh; line-height: 1; }
+.sigcard .sc-line { font-size: 1.8vh; font-variation-settings: 'wdth' 85, 'wght' 400; margin-top: 0.5vh; opacity: 0.8; }
+@keyframes sigIn { from { opacity: 0; transform: rotate(-12deg) scale(1.4) translateY(-6vh); } }
+
+/* ---------- track card progress ---------- */
+.card .prog { display: flex; gap: 1.4vh; align-items: center; margin-top: 1vh; font-size: 1.5vh; letter-spacing: 0.12em; }
+.card .prog .stars i { font-style: normal; font-size: 2.2vh; color: rgba(255,255,255,0.25); margin-right: 0.3vh; }
+.card .prog .stars i.on { color: var(--yellow); text-shadow: 0 0 1vh rgba(255,212,0,0.6); }
+.card .prog .sigs { opacity: 0.8; }
+
+/* ---------- earned paints ---------- */
+.swatches { flex-wrap: wrap; max-width: 60vh; }
+.swatches i.locked { opacity: 0.35; position: relative; cursor: not-allowed; }
+.swatches i.locked::after { content: '🔒'; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 1.8vh; transform: skewX(14deg); font-style: normal; }
+.swatches i.chrome, .swatches i.metal { background-image: linear-gradient(135deg, rgba(255,255,255,0.7), rgba(255,255,255,0) 45%, rgba(0,0,0,0.3)) !important; }
+
+/* ---------- results extras + replay ---------- */
+.r-extra { position: absolute; left: 6vw; top: 13.5vh; display: flex; gap: 1.2vh; flex-wrap: wrap; }
+.r-extra span { font-size: 1.8vh; letter-spacing: 0.15em; padding: 0.5vh 1.4vh; background: rgba(255,212,0,0.15); border: 0.2vh solid var(--yellow); color: var(--yellow); transform: skewX(-12deg); }
+.r-replay { position: absolute; right: 4vw; bottom: 17vh; font-size: 1.8vh; letter-spacing: 0.2em; text-align: right; }
+.r-replay b { display: block; font-size: 2.4vh; color: var(--hot); animation: blink 1.4s infinite; }
+#s-results.replay { background: linear-gradient(90deg, rgba(0,0,0,0.25), rgba(0,0,0,0) 60%); }
+#s-results.replay .results { left: 4vw; top: 20vh; transform: scale(0.7); transform-origin: left top; }
+#s-results.replay .rrow:not(.me) { background: rgba(8, 9, 14, 0.55); }

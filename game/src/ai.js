@@ -1,9 +1,14 @@
 // AI driver: follows a racing line with look-ahead steering, brakes for curvature, avoids
 // traffic, rubber-bands to the player, boosts on straights and sometimes rams the player.
+// Some laps it takes the track's shortcut.
 import { wrapAngle } from './trackMath.js';
 
 export class AIDriver {
-  constructor(vehicle, track, { lane = 0, skill = 1, aggression = 0.3, refTopSpeed = null } = {}) {
+  constructor(vehicle, track, { lane = 0, skill = 1, aggression = 0.3, refTopSpeed = null, shortcut = null, shortcutChance = 0.4 } = {}) {
+    this.sc = shortcut;
+    this.scChance = shortcutChance;
+    this.scPlan = null; // this lap: take the shortcut? (null = not decided yet)
+    this.pq = {};
     // pull AI cars most of the way toward the player's car performance so no pick is unwinnable
     // (fully for slow player cars, only a little for fast ones so a fast pick still pays off)
     const ratio = refTopSpeed ? refTopSpeed / vehicle.spec.topSpeed : 1;
@@ -56,18 +61,31 @@ export class AIDriver {
       desired = player.lateral;
       ramming = true;
     }
+    // shortcut: decide on the approach, line up on its side, then follow it
+    let route = track, rs = v.s, lane = null;
+    const sc = this.sc;
+    if (sc && v.onSC) { route = sc.path; rs = v.scU; lane = 0; }
+    else if (sc) {
+      const d = track.deltaS(v.s, sc.a); // + = fork ahead
+      if (d > 220 || d < -60) this.scPlan = null;
+      else if (this.scPlan === null && d > 60) this.scPlan = Math.random() < this.scChance;
+      if (this.scPlan && d < 110 && d > -60) {
+        desired = sc.side * (track.halfWidth - 2.6);
+        if (d < 20) { route = sc.path; rs = sc.path.project(v.x, v.z, -1, this.pq).s; lane = 0; }
+      }
+    }
     this.laneTarget += (desired - this.laneTarget) * Math.min(1, dt * 1.8);
     this.laneTarget = Math.max(-hw, Math.min(hw, this.laneTarget));
 
     // look-ahead point on the racing line
     const look = 10 + speed * 0.55;
-    const p = track.pointAt(v.s + look, this.laneTarget, this.pt);
+    const p = route.pointAt(rs + look, lane ?? this.laneTarget, this.pt);
     const ang = Math.atan2(p.x - v.x, p.z - v.z);
     const err = wrapAngle(ang - v.heading); // + = target to the left
     let steer = Math.max(-1, Math.min(1, -err * 2.6));
 
     // target speed from curvature ahead
-    const curv = track.maxCurvatureAhead(v.s, 20 + speed * 1.6);
+    const curv = route.maxCurvatureAhead(rs, 20 + speed * 1.6);
     // fastest speed at which the car's yaw rate (turn * (1 - 0.5 v/top)) can follow this curve
     const k = 0.74 * this.skill, turn = v.spec.turn, top = v.spec.topSpeed;
     const vCurve = (k * turn) / (curv + (0.5 * k * turn) / top);
@@ -90,7 +108,8 @@ export class AIDriver {
     if (ramming) { throttle = 1; brake = 0; }
 
     // recover when stuck or facing the wrong way
-    const backwards = Math.abs(wrapAngle(v.heading - track.headingAt(v.idx))) > 1.8;
+    const roadDir = v.onSC && sc ? sc.path.headingAt(v.scIdx) : track.headingAt(v.idx);
+    const backwards = Math.abs(wrapAngle(v.heading - roadDir)) > 1.8;
     if (speed < 3 || backwards) this.stuckTime += dt; else this.stuckTime = 0;
     const needsReset = this.stuckTime > (backwards ? 1.5 : 3);
     if (needsReset) this.stuckTime = 0;

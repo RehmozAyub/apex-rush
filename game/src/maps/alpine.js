@@ -59,6 +59,7 @@ export default {
     barrier: { type: 'guardrail', color: 0xc8ccd2, glow: [0xff8a00, 0xff8a00], glowIntensity: 1.4 },
     embankment: 0x4f6a36,
     shoulder: 0x55524a,
+    shortcut: { color: 0x6a6356 },
     accent: '#2d8cff',
   },
 
@@ -132,7 +133,11 @@ export default {
     envGround.position.y = -6;
     envScene.add(envGround);
 
+    // signature spot: the steepest downhill run
+    let dropI = 0;
+    for (let i = 0; i < track.n; i++) if (track.grade[i] < track.grade[dropI]) dropI = i;
     return {
+      landmark: { s: [dropI * track.step], range: 60 },
       update(dt, time) {
         for (const b of balloons) {
           b.position.y = b.userData.base + Math.sin(time * 0.2 + b.userData.ph) * 6;

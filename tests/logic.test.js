@@ -344,3 +344,82 @@ test('every car spends the points budget (within 10%), most exactly', () => {
   }
   assert.ok(exact > CARS.length / 2);
 });
+
+import { findShortcut, constrainOnRoads, SHORTCUT } from '../game/src/shortcut.js';
+import { AIDriver } from '../game/src/ai.js';
+import { signatureAt, hairpinS, SIGNATURES, SIGNATURE_KINDS } from '../game/src/signatures.js';
+import { recordRace, discoverSignature, unlockedPaints, emptyProgress, starsEarned } from '../game/src/progress.js';
+import { PAINTS, BASE_PAINTS } from '../game/src/config.js';
+
+test('every track gets a shortcut that saves distance and is smooth', () => {
+  for (const [id, lay] of Object.entries(LAYOUTS)) {
+    const t = new TrackPath(lay.points, { width: lay.width });
+    const sc = findShortcut(t);
+    assert.ok(sc, `${id}: no shortcut`);
+    assert.ok(sc.saving >= SHORTCUT.minSaving && sc.saving <= SHORTCUT.maxSaving, `${id}: saves ${sc.saving}`);
+    for (let i = 0; i < sc.path.n; i++) assert.ok(Math.abs(sc.path.curv[i]) <= 1 / SHORTCUT.minRadius + 1e-6, `${id}: tight at ${i}`);
+    assert.ok(sc.mainGap.some(Boolean), `${id}: no barrier gap`);
+    assert.ok(sc.a > 150 && sc.b < t.length - 100, `${id}: too close to the start line`);
+  }
+});
+
+test('an AI that takes the shortcut drives through it cleanly and gains time', () => {
+  for (const id of ['city', 'canyon']) {
+    const lay = LAYOUTS[id];
+    const t = new TrackPath(lay.points, { width: lay.width });
+    const sc = findShortcut(t);
+    const lapTime = (chance) => {
+      const v = new Vehicle(CARS[1]);
+      v.placeOnTrack(t, 0, 0, 0);
+      const ai = new AIDriver(v, t, { skill: 1, aggression: 0, shortcut: sc, shortcutChance: chance });
+      ai.boostCooldown = 1e9;
+      let dist = 0, last = v.s, time = 0, entered = 0, was = false, hits = 0;
+      while (dist < t.length && time < 150) {
+        const c = ai.think(1 / 120, [], null, 0, 0);
+        c.boost = false;
+        assert.ok(!c.needsReset, `${id}: AI got stuck`);
+        v.update(1 / 120, c, 1);
+        const h = constrainOnRoads(v, t, sc);
+        if (h && h.vn > 3) hits++;
+        if (v.onSC && !was) entered++;
+        was = v.onSC;
+        dist += t.deltaS(last, v.s); last = v.s; time += 1 / 120;
+      }
+      return { time, entered, hits };
+    };
+    const main = lapTime(0), cut = lapTime(1);
+    assert.equal(main.entered, 0);
+    assert.equal(cut.entered, 1, `${id}: entered ${cut.entered} times`);
+    assert.equal(cut.hits, 0);
+    assert.ok(cut.time < main.time, `${id}: shortcut ${cut.time.toFixed(1)} vs ${main.time.toFixed(1)}`);
+  }
+});
+
+test('signature takedown spots', () => {
+  const t = new TrackPath(LAYOUTS.coast.points, { width: LAYOUTS.coast.width });
+  const hp = hairpinS(t);
+  const ctx = (o) => ({ track: t, s: 1000, onShortcut: false, hairpin: hp, landmark: { s: [800], range: 80 }, ...o });
+  assert.equal(signatureAt('coast', ctx({ s: 820 })).id, 'landmark');
+  assert.equal(signatureAt('coast', ctx({ s: hp + 10 })).id, 'hairpin');
+  assert.equal(signatureAt('coast', ctx({ s: t.length - 20 })).id, 'line');
+  assert.equal(signatureAt('coast', ctx({ onShortcut: true })).id, 'shortcut');
+  assert.equal(signatureAt('coast', ctx({ s: (hp + 1500) % t.length, landmark: null })), null);
+  for (const defs of Object.values(SIGNATURES)) for (const k of SIGNATURE_KINDS) assert.ok(defs[k].name && defs[k].line);
+});
+
+test('stars, signatures and earned paints', () => {
+  assert.deepEqual(starsEarned({ pos: 1, takedowns: 5, crashes: 0 }), [true, true, true]);
+  assert.deepEqual(starsEarned({ pos: 2, takedowns: 4, crashes: 1 }), [false, false, false]);
+  const p = emptyProgress();
+  assert.ok(unlockedPaints(p, PAINTS).slice(0, BASE_PAINTS).every(Boolean));
+  assert.ok(!unlockedPaints(p, PAINTS).slice(BASE_PAINTS).some(Boolean));
+  let r = recordRace(p, 'coast', { pos: 1, takedowns: 12, crashes: 2 }, PAINTS);
+  assert.deepEqual(r.stars, [0, 1]);
+  assert.ok(r.paints.some((x) => x.unlock.takedowns === 10));
+  r = recordRace(p, 'coast', { pos: 1, takedowns: 0, crashes: 0 }, PAINTS);
+  assert.deepEqual(r.stars, [2]); // only the new one
+  assert.deepEqual(p.stars.coast, [true, true, true]);
+  assert.equal(p.totalTakedowns, 12);
+  assert.ok(discoverSignature(p, 'coast', 'line'));
+  assert.ok(!discoverSignature(p, 'coast', 'line'));
+});

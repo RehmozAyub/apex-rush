@@ -69,6 +69,7 @@ export default {
     barrier: { type: 'wall', color: 0x5a5c52, height: 0.9, glow: [0xffd23f, 0xffd23f], glowIntensity: 1.2 },
     embankment: 0x3a4a2a,
     shoulder: 0x3a3a30,
+    shortcut: { color: 0x4d3b28 },
     accent: '#3dff8a',
   },
 
@@ -150,7 +151,16 @@ export default {
     envGround.position.y = -6;
     envScene.add(envGround);
 
+    // signature spots: where the road crosses the river
+    const cross = [];
+    for (let i = 0; i < track.n; i++) {
+      const d = Math.abs(track.z[i] - riverZ(track.x[i]));
+      const dp = Math.abs(track.z[(i - 1 + track.n) % track.n] - riverZ(track.x[(i - 1 + track.n) % track.n]));
+      const dn = Math.abs(track.z[(i + 1) % track.n] - riverZ(track.x[(i + 1) % track.n]));
+      if (d < 20 && d <= dp && d <= dn) cross.push(i * track.step);
+    }
     return {
+      landmark: { s: cross, range: 45 },
       update(dt, time) { water.material.uniforms.uTime.value = time; },
     };
   },

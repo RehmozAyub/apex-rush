@@ -37,7 +37,7 @@ export class DriveAssist {
     const speed = Math.abs(vF);
     const rel = wrapAngle(v.heading - track.headingAt(v.idx));
     // reversing, crawling, facing backwards: the driver is on their own
-    if (v.wrecked || vF < 3 || Math.abs(rel) > 1.6) return out;
+    if (v.wrecked || v.onSC || vF < 3 || Math.abs(rel) > 1.6) return out;
 
     const hw = track.halfWidth - o.wallMargin;
     const clamp = (x) => Math.max(-hw, Math.min(hw, x));

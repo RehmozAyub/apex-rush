@@ -103,7 +103,7 @@ export class PickupVisuals {
     this.geos = [ring, chev, pool, box, cage];
     this.nodes = new Map();
     for (const it of items) {
-      const p = track.pointAt(it.s, it.lateral);
+      const p = it.pos || track.pointAt(it.s, it.lateral); // it.pos: placed off the main road (shortcut)
       it.x = p.x; it.z = p.z; it.y = p.y;
       const g = new THREE.Group();
       g.position.set(p.x, p.y, p.z);

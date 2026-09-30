@@ -21,36 +21,7 @@ export function fbm(x, z, oct = 5) {
   return v;
 }
 
-export class TrackIndex {
-  constructor(track, cell = 40) {
-    this.track = track;
-    this.cell = cell;
-    this.map = new Map();
-    for (let i = 0; i < track.n; i += 2) {
-      const k = this.key(Math.floor(track.x[i] / cell), Math.floor(track.z[i] / cell));
-      if (!this.map.has(k)) this.map.set(k, []);
-      this.map.get(k).push(i);
-    }
-  }
-  key(cx, cz) { return cx * 73856093 ^ cz * 19349663; }
-  // Nearest distance to the centreline and that sample's height (Infinity if > radius cells away)
-  nearest(x, z, radiusCells = 3) {
-    const t = this.track;
-    const cx = Math.floor(x / this.cell), cz = Math.floor(z / this.cell);
-    let best = Infinity, by = 0, bi = -1;
-    for (let dx = -radiusCells; dx <= radiusCells; dx++) {
-      for (let dz = -radiusCells; dz <= radiusCells; dz++) {
-        const list = this.map.get(this.key(cx + dx, cz + dz));
-        if (!list) continue;
-        for (const i of list) {
-          const d = (t.x[i] - x) ** 2 + (t.z[i] - z) ** 2;
-          if (d < best) { best = d; by = t.y[i]; bi = i; }
-        }
-      }
-    }
-    return { dist: Math.sqrt(best), y: by, idx: bi };
-  }
-}
+export { TrackIndex, CompositeIndex } from './terrain-index.js';
 
 const smooth = (a, b, x) => {
   const t = Math.max(0, Math.min(1, (x - a) / (b - a)));

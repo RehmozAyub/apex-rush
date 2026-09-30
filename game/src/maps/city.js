@@ -51,10 +51,12 @@ export default {
     barrier: { type: 'wall', color: 0x5a5c66, height: 1.05, glow: [0xff2d95, 0x19e3ff], glowIntensity: 3 },
     embankment: null,
     shoulder: 0x2a2a30,
+    shortcut: { color: 0x3b3b40 },
     accent: '#19e3ff',
   },
 
-  build({ scene, track, index, density, envScene }) {
+  build({ scene, track, index, density, envScene, shortcut }) {
+    const gap = (s, side) => shortcut && shortcut.isGap(s, side);
     const rand = rng(7);
     const hw = track.halfWidth;
 
@@ -126,6 +128,7 @@ export default {
     let side = 1;
     for (let s = 20; s < track.length; s += 38) {
       side = -side;
+      if (gap(s, side)) continue;
       const p = track.pointAt(s, side * (hw + 2.2));
       poles.push({ x: p.x, y: 4.5, z: p.z, s: 1 });
       const arm = track.pointAt(s, side * (hw - 0.2));
@@ -143,9 +146,11 @@ export default {
     scene.add(poolMesh);
 
     // neon arches over the road
-    const arches = [];
+    const arches = [], archS = [];
     for (let k = 0; k < 11; k++) {
       const s = (k + 0.5) * (track.length / 11);
+      if (gap(s, 1) || gap(s, -1)) continue;
+      archS.push(s);
       const p = track.pointAt(s, 0);
       const col = NEON[k % 2 ? 0 : 1];
       const m = new THREE.MeshBasicMaterial({ color: new THREE.Color(col).multiplyScalar(5) });
@@ -184,6 +189,7 @@ export default {
     }
 
     return {
+      landmark: { s: archS, range: 14 },
       update(dt, time) {
         const blink = Math.sin(time * 3) > 0.6 ? 6 : 0.4;
         beaconMat.color.setRGB(blink, 0.12 * blink, 0.12 * blink);

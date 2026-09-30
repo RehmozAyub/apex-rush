@@ -48,10 +48,12 @@ export default {
     barrier: { type: 'guardrail', color: 0xb8bec8, glow: [0xff3a1a, 0xff3a1a], glowIntensity: 1.6 },
     embankment: 0xe6ebf2,
     shoulder: 0xd8dee8,
+    shortcut: { color: 0xd6dce6 },
     accent: '#7ac8ff',
   },
 
-  build({ scene, track, index, density, envScene, sunDir }) {
+  build({ scene, track, index, density, envScene, sunDir, shortcut }) {
+    const gap = (s, side) => shortcut && shortcut.isGap(s, side);
     const rand = rng(77);
     const hw = track.halfWidth;
     const heightAt = makeHeightFn(index, natural, { hw, near: -1.3, blendStart: 12, blendEnd: 110 });
@@ -96,11 +98,13 @@ export default {
     const poles = [], lamps = [], heads = [], pools = [];
     for (let s = 0; s < track.length; s += 22) {
       for (const side of [-1, 1]) {
+        if (gap(s, side)) continue;
         const p = track.pointAt(s, side * (hw + 1.6));
         poles.push({ x: p.x, y: p.y + 0.9, z: p.z });
       }
     }
     for (let s = 30, side = 1; s < track.length; s += 70, side = -side) {
+      if (gap(s, side)) continue;
       const p = track.pointAt(s, side * (hw + 2.4));
       lamps.push({ x: p.x, y: p.y + 4.5, z: p.z });
       const a = track.pointAt(s, side * (hw - 0.4));
@@ -137,6 +141,9 @@ export default {
     const envGround = new THREE.Mesh(new THREE.CircleGeometry(300, 24).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xc8d0dc }));
     envGround.position.y = -6;
     envScene.add(envGround);
-    return {};
+    // signature spot: the stretch of road closest to the frozen lake
+    let lakeS = 0, lakeD = Infinity;
+    for (let i = 0; i < track.n; i++) { const d = Math.hypot(track.x[i], track.z[i]); if (d < lakeD) { lakeD = d; lakeS = i * track.step; } }
+    return { landmark: { s: [lakeS], range: 80 } };
   },
 };
