@@ -432,7 +432,7 @@ body.touch #tc.on { display: block; position: absolute; inset: 0; pointer-events
 @keyframes shock { from { opacity: 0.8; transform: scale(1); } to { opacity: 0; transform: scale(1.45); } }
 
 /* DRIFT: a slab leaning into the slide, hot edge, a car kicking out over its own skid marks */
-.tc-drift { width: calc(var(--u) * 22); height: calc(var(--u) * 17); right: calc(3vw + var(--u) * 29); bottom: calc(5vh + var(--sb)); transform: skewX(-14deg);
+.tc-drift { width: calc(var(--u) * 22); height: calc(var(--u) * 17); right: calc(3vw + var(--u) * 31); bottom: calc(5vh + var(--sb)); transform: skewX(-14deg);
   border-radius: calc(var(--u) * 1.4); border: calc(var(--u) * 0.45) solid var(--hot); background: linear-gradient(160deg, rgba(40, 6, 16, 0.62), rgba(12, 6, 10, 0.7)); }
 .tc-drift::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: calc(var(--u) * 1.1); background: var(--grad); border-radius: 0 0 calc(var(--u) * 0.8) calc(var(--u) * 0.8); }
 .tc-drift > i { display: flex; flex-direction: column; align-items: center; gap: calc(var(--u) * 0.6); transform: skewX(14deg); font-style: italic; }
@@ -447,7 +447,7 @@ body.touch #tc.on { display: block; position: absolute; inset: 0; pointer-events
 @keyframes skid { to { stroke-dashoffset: -10.8; } }
 
 /* BRAKE: small stop-sign octagon, dark until you press it, then it glows like brake lights */
-.tc-brake { width: calc(var(--u) * 15); height: calc(var(--u) * 15); right: calc(3vw + var(--u) * 31.5); bottom: calc(5vh + var(--u) * 21 + var(--sb));
+.tc-brake { width: calc(var(--u) * 15); height: calc(var(--u) * 15); right: calc(3vw + var(--u) * 34); bottom: calc(5vh + var(--u) * 21 + var(--sb));
   clip-path: polygon(29% 0, 71% 0, 100% 29%, 100% 71%, 71% 100%, 29% 100%, 0 71%, 0 29%); background: rgba(255, 59, 48, 0.7); }
 .tc-brake::before { content: ''; position: absolute; inset: calc(var(--u) * 0.5); clip-path: inherit; background: rgba(18, 8, 8, 0.72); transition: background 0.07s; }
 .tc-brake span { position: relative; font-size: calc(var(--u) * 2.5); }
