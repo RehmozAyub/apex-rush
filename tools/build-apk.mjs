@@ -1,7 +1,8 @@
 // Packages the game as an Android app: release/ApexRush.apk
 // The toolchain (JDK 17, Android SDK, Gradle) and the Gradle build live in S:\ApexRushAndroid
 // (override with APEX_ANDROID_HOME) so nothing heavy syncs to Google Drive. First run downloads
-// about 3 GB. `node tools/build-apk.mjs --setup` only installs the toolchain.
+// about 3 GB. `node tools/build-apk.mjs --setup` only installs the toolchain; `--debug` builds
+// release/ApexRush-debug.apk (debug key, WebView inspectable) for testing on an emulator.
 import { execSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync, copyFileSync, statSync, renameSync } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -113,11 +114,14 @@ async function build() {
   writeFileSync(join(work, 'version.properties'), `versionName=${process.env.APEX_VERSION || version}\nversionCode=${process.env.APEX_VERSION_CODE || Math.floor(Date.now() / 60000) - 29000000}\n`);
 
   console.log('Running Gradle...');
-  run(`"${join(GRADLE, 'bin', 'gradle.bat')}" --no-daemon -q assembleRelease`, { cwd: work });
-  const apk = join(work, 'app', 'build', 'outputs', 'apk', 'release', 'app-release.apk');
+  const debug = process.argv.includes('--debug');
+  run(`"${join(GRADLE, 'bin', 'gradle.bat')}" --no-daemon -q ${debug ? 'assembleDebug' : 'assembleRelease'}`, { cwd: work });
+  const kind = debug ? 'debug' : 'release';
+  const apk = join(work, 'app', 'build', 'outputs', 'apk', kind, `app-${kind}.apk`);
+  const name = debug ? 'ApexRush-debug.apk' : 'ApexRush.apk';
   mkdirSync(join(root, 'release'), { recursive: true });
-  copyFileSync(apk, join(root, 'release', 'ApexRush.apk'));
-  console.log(`\nBuilt release/ApexRush.apk (${(statSync(apk).size / 1048576).toFixed(1)} MB)`);
+  copyFileSync(apk, join(root, 'release', name));
+  console.log(`\nBuilt release/${name} (${(statSync(apk).size / 1048576).toFixed(1)} MB)`);
 }
 
 if (process.argv.includes('--setup')) await setup();

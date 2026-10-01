@@ -1,6 +1,7 @@
 // Keyboard, gamepad and touch input. Drive controls are polled; menu actions are pushed as events.
 // lastDevice follows whatever was used last: a touch shows the on-screen controls (body.touch),
 // a key or pad button hides them again.
+import { IS_MOBILE } from './config.js';
 
 // Split-screen key sets. In single player every key works for the one player.
 export const PLAYER_KEYS = [
@@ -38,7 +39,7 @@ export class Input {
     this.padPrev = {};
     this.lastDevice = 'keyboard';
     this.touch = null; // TouchControls, on touch screens
-    if (navigator.maxTouchPoints > 0 && matchMedia('(pointer: coarse)').matches) this.setDevice('touch');
+    if (IS_MOBILE || (navigator.maxTouchPoints > 0 && matchMedia('(pointer: coarse)').matches)) this.setDevice('touch');
     window.addEventListener('pointerdown', (e) => { if (e.pointerType === 'touch') this.setDevice('touch'); }, true);
     window.addEventListener('keydown', (e) => {
       if (e.repeat) {
