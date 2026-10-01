@@ -1,20 +1,26 @@
-// One shortcut per track: a narrower dirt road that forks off the inside of a long bend and
-// rejoins further on. It is found automatically from the track shape (pure logic, no three.js).
+// Shortcuts (2-3 per track): narrower dirt roads that fork off the inside of long bends and
+// rejoin further on, some with ramps, some hidden behind a fence. They are found automatically
+// from the track shape (pure logic, no three.js). Also the airborne physics for ramps.
 //
 // The shortcut is an open path with the same track-space queries as TrackPath (project,
 // pointAt, curvature), so the vehicle constraint and the AI can drive on it. Where it overlaps
 // the main road (the fork and the merge) the barriers between the two are left out.
 import { TrackIndex } from './terrain-index.js';
+import { wrapAngle } from './trackMath.js';
 
 export const SHORTCUT = {
   width: 11,
   minStartS: 220, // keep clear of the start line and grid
   endMargin: 160,
-  minSpan: 140, maxSpan: 620, // main-road distance the shortcut replaces (m)
-  minSaving: 75, maxSaving: 170, // metres saved
+  minSpan: 140, maxSpan: 850, // main-road distance the shortcut replaces (m)
+  minSaving: 70, maxSaving: 170, // metres saved (the first shortcut)
+  minSavingExtra: 40, // later ones (they get ramps / boost rings on top)
   minRadius: 45,
   clearance: 16, // gap to any other part of the main road (beyond both half widths)
   maxGrade: 0.1,
+  separation: 120, // between two shortcuts along the main road (m)
+  searchStep: 20,
+  forkLength: 60, // the shortcut must leave the main road within this distance (m)
 };
 
 // Open polyline resampled at a uniform step, with TrackPath-like queries.
@@ -145,12 +151,21 @@ function bezierPoints(track, a, b, side, width) {
   return { pts, chord };
 }
 
-// Search the track for the best corner to cut. Returns null when nothing suitable exists.
-export function findShortcut(track, index = new TrackIndex(track), R = SHORTCUT, stats = {}) {
+// Search the track for the best corner to cut, away from the shortcuts already `taken`.
+// Returns null when nothing suitable exists.
+export function findShortcut(track, index = new TrackIndex(track), R = SHORTCUT, stats = {}, taken = []) {
   const L = track.length, hw = track.halfWidth;
   let best = null;
-  for (let a = R.minStartS; a < L - R.endMargin - R.minSpan; a += 10) {
-    for (let span = R.minSpan; span <= R.maxSpan && a + span < L - R.endMargin; span += 10) {
+  const clashes = (a, b, path) => taken.some((t) => {
+    if (a < t.b + R.separation && b > t.a - R.separation) return true;
+    for (let i = 0; i < path.n; i += 3) {
+      const q = t.path.project(path.x[i], path.z[i]);
+      if (Math.hypot(q.lateral, q.beyond) < path.width * 3) return true;
+    }
+    return false;
+  });
+  for (let a = R.minStartS; a < L - R.endMargin - R.minSpan; a += R.searchStep) {
+    for (let span = R.minSpan; span <= R.maxSpan && a + span < L - R.endMargin; span += R.searchStep) {
       const b = a + span;
       // cut the inside of the bend
       let turn = 0;
@@ -174,21 +189,85 @@ export function findShortcut(track, index = new TrackIndex(track), R = SHORTCUT,
       const other = (i) => i >= i0 && i <= i1;
       for (let i = 0; i < path.n && ok; i++) {
         const u = i * path.step;
-        if (u > 60 && u < path.length - 60 && index.nearest(path.x[i], path.z[i], 2).dist < hw + path.halfWidth) { ok = false; stats.onRoad = (stats.onRoad || 0) + 1; }
+        if (u > R.forkLength && u < path.length - R.forkLength && index.nearest(path.x[i], path.z[i], 2).dist < hw + path.halfWidth) { ok = false; stats.onRoad = (stats.onRoad || 0) + 1; }
         else if (index.nearest(path.x[i], path.z[i], 3, other).dist < hw + path.halfWidth + R.clearance) ok = false;
       }
       if (!ok) { stats.shape = (stats.shape || 0) + 1; continue; }
+      if (clashes(a, b, path)) continue;
       best = { a, b, side, saving: realSaving, path };
     }
   }
   return best ? new Shortcut(track, best) : null;
 }
 
+// Up to `count` shortcuts per track, each with its own character:
+//   1st: open, with a full-width ramp       2nd: hidden behind a fence, with a half ramp
+//   3rd: hidden behind a fence, with a boost ring
+export function findShortcuts(track, index = new TrackIndex(track), count = 3, R = SHORTCUT) {
+  const list = [];
+  for (let k = 0; k < count; k++) {
+    const sc = findShortcut(track, index, k === 0 ? R : { ...R, minSaving: R.minSavingExtra, minRadius: R.minRadius * 0.85, clearance: R.clearance * 0.7, forkLength: 95 }, {}, list);
+    if (!sc) break;
+    list.push(sc);
+  }
+  list.sort((p, q) => q.saving - p.saving);
+  return withFeatures(list);
+}
+
+// Rebuild shortcuts from saved { a, b, side } specs (skips the search; see world.js cache).
+export function shortcutsFromSpecs(track, specs, R = SHORTCUT) {
+  return withFeatures(specs.map(({ a, b, side }) => {
+    const path = new OpenPath(bezierPoints(track, a, b, side, R.width).pts, { width: R.width });
+    return new Shortcut(track, { a, b, side, path, saving: b - a - path.length });
+  }));
+}
+
+// Lip position for a ramp: the middle stretch of the shortcut with the straightest landing
+// zone ahead (a car in the air flies straight).
+function straightestLip(sc) {
+  const p = sc.path;
+  let best = p.length * 0.5, bestC = Infinity;
+  for (let u = p.length * 0.3; u < p.length * 0.65; u += 4) {
+    const c = p.maxCurvatureAhead(u - 12, 75);
+    if (c < bestC) { bestC = c; best = u; }
+  }
+  return best;
+}
+
+function withFeatures(list) {
+  list.forEach((sc, k) => {
+    sc.id = k;
+    sc.fence = k > 0;
+    const lip = straightestLip(sc);
+    if (k === 0) sc.ramps = [{ u0: lip - 10, len: 10, h: 1.7, half: 0 }];
+    else if (k === 1) sc.ramps = [{ u0: lip - 8, len: 8, h: 1.4, half: -sc.side }];
+    else { sc.ramps = []; sc.boostRing = true; }
+  });
+  return list;
+}
+
 export class Shortcut {
   constructor(track, { a, b, side, path, saving }) {
     this.track = track;
     this.a = a; this.b = b; this.side = side; this.path = path; this.saving = saving;
+    this.ramps = [];
+    this.fence = false;
     const hw = track.halfWidth, shw = path.halfWidth;
+    // height: where the shortcut runs on or beside the main road (fork and merge) it follows the
+    // main road's surface exactly, then eases into a straight grade across the corner
+    const q0 = {};
+    const chordY = Float32Array.from(path.y);
+    for (let j = 0; j < path.n; j++) {
+      track.project(path.x[j], path.z[j], -1, q0);
+      const w = 1 - smoothstep(Math.max(0, Math.min(1, (Math.abs(q0.lateral) - hw * 0.5) / 30)));
+      path.y[j] = q0.y * w + chordY[j] * (1 - w);
+    }
+    const ys = Float32Array.from(path.y);
+    for (let j = 2; j < path.n - 2; j++) path.y[j] = (ys[j - 2] + ys[j - 1] + ys[j] + ys[j + 1] + ys[j + 2]) / 5;
+    for (let j = 0; j < path.n; j++) {
+      const i0 = Math.max(0, j - 1), i1 = Math.min(path.n - 1, j + 1);
+      path.grade[j] = (path.y[i1] - path.y[i0]) / ((i1 - i0) * path.step || 1);
+    }
     // main-road barrier samples on the shortcut's side that lie inside the shortcut are gaps
     this.mainGap = new Uint8Array(track.n);
     const q = {};
@@ -222,6 +301,7 @@ export class Shortcut {
     while (last > 0 && (this.pathGap[0][last] || this.pathGap[1][last])) last--;
     this.overlapIn = first * path.step;
     this.overlapOut = path.length - last * path.step;
+    this.fenceU = this.overlapIn + 10; // where a fence blocks the way in (fenced shortcuts)
   }
 
   // main-road s for a distance u along the shortcut (progress is linear, so it gains on the loop)
@@ -233,44 +313,151 @@ export class Shortcut {
     return !!this.mainGap[Math.round(this.track.wrapS(s) / this.track.step) % this.track.n];
   }
 
-  // is a world point on the shortcut's surface?
-  contains(x, z, out = {}) {
-    this.path.project(x, z, -1, out);
-    return out.beyond === 0 && Math.abs(out.lateral) <= this.path.halfWidth;
+  // extra surface height of a ramp at (u, lateral); 0 off the ramps. Each ramp rises linearly
+  // and ends in a drop (the kicker). A half ramp only covers one side of the road.
+  rampHeight(u, lat) {
+    for (const r of this.ramps) {
+      if (u < r.u0 || u > r.u0 + r.len) continue;
+      if (r.half && lat * r.half < -0.3) continue;
+      return r.h * ((u - r.u0) / r.len);
+    }
+    return 0;
+  }
+
+  rampAt(u) { return this.ramps.find((r) => u >= r.u0 - 1 && u <= r.u0 + r.len + 1) || null; }
+}
+
+// All the shortcuts of a track, queried together (barrier gaps, scenery clearance).
+export class ShortcutSet {
+  constructor(track, list) {
+    this.track = track;
+    this.list = list;
+  }
+
+  isGap(s, side) { return this.list.some((sc) => sc.isGap(s, side)); }
+
+  // keep(side) -> filter for main-road roadside samples (null when nothing is cut on that side)
+  mainKeep(side) {
+    const cuts = this.list.filter((sc) => sc.side === side);
+    if (!cuts.length) return null;
+    return (i) => cuts.every((sc) => !sc.mainGap[i]);
+  }
+
+  // is a world point on (or within `margin` of) any shortcut's road?
+  near(x, z, margin = 0) {
+    const q = {};
+    return this.list.some((sc) => { sc.path.project(x, z, -1, q); return q.beyond === 0 && Math.abs(q.lateral) < sc.path.halfWidth + margin; });
   }
 }
 
+export const AIR = { gravity: 22, lipDrop: 0.3, minLaunch: 2, maxLaunch: 8, airTurn: 1.2 };
+
+// Ground height under the car (road + ramp) and the airborne state. A car leaving a ramp lip
+// flies; while airborne it keeps its momentum and lands back on the ground. With drift held
+// and steering at take-off it does a trick: a flat spin (full ramp) or a barrel roll (half
+// ramp), timed to finish on landing. Landings push { type: 'land', airTime, trick, clean }
+// to v.events.
+// tangent: road direction under the car ({tx, tz}); airborne cars turn toward it (air control)
+function airStep(v, ground, dt, ramp, tangent = null) {
+  if (v.wrecked) { v.air = false; v.lastGround = ground; v.roadY = ground; return; }
+  v.roadY = ground;
+  if (!v.air) {
+    const last = v.lastGround ?? ground;
+    const vyG = (ground - last) / Math.max(dt, 1e-4);
+    if (ground < last - AIR.lipDrop && (v.vyGround ?? 0) > AIR.minLaunch) {
+      // off the lip: take off
+      v.air = true;
+      v.vy = Math.min(AIR.maxLaunch, v.vyGround);
+      v.airY = last;
+      v.airTime = 0;
+      v.trick = null;
+      if (v.inHandbrake && Math.abs(v.inSteer) > 0.3) {
+        const drop = last - ground;
+        const T = (v.vy + Math.sqrt(v.vy * v.vy + 2 * AIR.gravity * drop)) / AIR.gravity;
+        v.trick = { kind: ramp && ramp.half ? 'roll' : 'spin', dir: Math.sign(v.inSteer), rate: (Math.PI * 2) / Math.max(0.35, T), angle: 0 };
+      }
+    } else {
+      v.vyGround = vyG;
+      v.y = ground;
+    }
+  }
+  if (v.air) {
+    v.vy -= AIR.gravity * dt;
+    v.airY += v.vy * dt;
+    v.airTime += dt;
+    if (tangent) {
+      // arcade air control: the car (and its flight) eases round to follow the road below
+      const want = Math.atan2(tangent.tx, tangent.tz);
+      const back = Math.abs(wrapAngle(v.heading - want)) > Math.PI / 2;
+      const target = back ? want + Math.PI : want;
+      const d = Math.max(-AIR.airTurn * dt, Math.min(AIR.airTurn * dt, wrapAngle(target - v.heading)));
+      v.heading = wrapAngle(v.heading + d);
+      const c = Math.cos(d), sn = Math.sin(d);
+      const vx = v.vx * c + v.vz * sn, vz = -v.vx * sn + v.vz * c;
+      v.vx = vx; v.vz = vz;
+    }
+    if (v.trick) v.trick.angle = Math.min(Math.PI * 2, v.trick.angle + v.trick.rate * dt);
+    if (v.airY <= ground) {
+      v.air = false;
+      v.vyGround = 0;
+      const t = v.trick;
+      (v.events || (v.events = [])).push({ type: 'land', airTime: v.airTime, trick: t ? t.kind : null, clean: !t || t.angle > Math.PI * 1.6, impact: -v.vy });
+      v.trick = null;
+      v.y = ground;
+    } else {
+      v.y = v.airY;
+      const sp = Math.hypot(v.vx, v.vz) || 1;
+      v.pitch = Math.max(-0.5, Math.min(0.5, -Math.atan2(v.vy, sp) * 0.7));
+    }
+  }
+  v.trickYaw = v.trick && v.trick.kind === 'spin' ? v.trick.angle * v.trick.dir : 0;
+  v.trickRoll = v.trick && v.trick.kind === 'roll' ? v.trick.angle * v.trick.dir : 0;
+  v.lastGround = ground;
+}
+
 // Keeps a vehicle on whichever road it is on. At the fork and the merge the barrier between the
-// roads is open, and a car crossing that edge switches roads. On the shortcut, v.s is mapped
-// back onto the main road (so race progress keeps working) and v.scU / v.scIdx hold the
-// position along the shortcut. Returns the wall hit (if any) like Vehicle.constrain.
-export function constrainOnRoads(v, track, sc, tmpP = {}, tmpQ = {}) {
-  if (!sc) return v.constrain(track);
-  const path = sc.path;
-  if (v.onSC) {
+// roads is open, and a car crossing that edge switches roads. On a shortcut, v.s is mapped back
+// onto the main road (so race progress keeps working) and v.sc / v.scU / v.scIdx hold the
+// position along it. Returns the wall hit (if any) like Vehicle.constrain.
+export function constrainOnRoads(v, track, set, dt = 1 / 120, tmpP = {}, tmpQ = {}) {
+  const list = set ? set.list : [];
+  if (v.onSC && v.sc) {
+    const sc = v.sc, path = sc.path;
     const q = path.project(v.x, v.z, v.scIdx ?? -1, tmpQ);
     const atEnd = q.beyond !== 0 || q.s < sc.overlapIn + 6 || q.s > path.length - sc.overlapOut - 6;
-    if (atEnd) {
+    let leave = false;
+    if (atEnd && !v.air) {
       const p = track.project(v.x, v.z, v.idx, tmpP);
-      if (q.beyond !== 0 || Math.abs(p.lateral) <= track.halfWidth - 1.1) { v.onSC = false; return v.constrain(track); }
+      leave = q.beyond !== 0 || Math.abs(p.lateral) <= track.halfWidth - 1.1;
     }
-    v.idx = v.scIdx ?? q.idx;
-    const hit = v.constrain(path);
-    v.scIdx = v.idx;
-    v.scU = v.s;
-    v.s = sc.mainS(v.scU);
-    v.idx = Math.round(v.s / track.step) % track.n;
-    v.lateral = sc.side * (track.halfWidth + 25); // off the main road for track-space checks
-    return hit;
+    if (!leave) {
+      v.idx = v.scIdx ?? q.idx;
+      const hit = v.constrain(path);
+      v.scIdx = v.idx;
+      v.scU = v.s;
+      v.s = sc.mainS(v.scU);
+      v.idx = Math.round(v.s / track.step) % track.n;
+      airStep(v, v.y + sc.rampHeight(v.scU, v.lateral), dt, sc.rampAt(v.scU), tmpQ);
+      v.lateral = sc.side * (track.halfWidth + 25); // off the main road for track-space checks
+      return hit;
+    }
+    v.onSC = false;
+    v.sc = null;
   }
   const p = track.project(v.x, v.z, v.idx, tmpP);
-  if (Math.abs(p.lateral) > track.halfWidth - 1.1 && sc.isGap(p.s, Math.sign(p.lateral))) {
-    const q = path.project(v.x, v.z, -1, tmpQ);
-    if (q.beyond === 0 && Math.abs(q.lateral) <= path.halfWidth - 1.1) {
-      v.onSC = true;
-      v.scIdx = q.idx;
-      return constrainOnRoads(v, track, sc, tmpP, tmpQ);
+  if (Math.abs(p.lateral) > track.halfWidth - 1.1) {
+    for (const sc of list) {
+      if (!sc.isGap(p.s, Math.sign(p.lateral))) continue;
+      const q = sc.path.project(v.x, v.z, -1, tmpQ);
+      if (q.beyond === 0 && Math.abs(q.lateral) <= sc.path.halfWidth - 1.1) {
+        v.onSC = true;
+        v.sc = sc;
+        v.scIdx = q.idx;
+        return constrainOnRoads(v, track, set, dt, tmpP, tmpQ);
+      }
     }
   }
-  return v.constrain(track);
+  const hit = v.constrain(track);
+  airStep(v, v.y, dt, null);
+  return hit;
 }

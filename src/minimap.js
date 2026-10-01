@@ -6,7 +6,7 @@ export class Minimap {
     this.bg = document.createElement('canvas');
   }
 
-  setTrack(track, accent = '#ff2d55', shortcut = null) {
+  setTrack(track, accent = '#ff2d55') {
     const size = this.canvas.width;
     this.bg.width = this.bg.height = size;
     let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
@@ -32,16 +32,6 @@ export class Minimap {
     g.lineJoin = 'round';
     path(); g.strokeStyle = 'rgba(0,0,0,0.55)'; g.lineWidth = 9; g.stroke();
     path(); g.strokeStyle = 'rgba(255,255,255,0.85)'; g.lineWidth = 4; g.stroke();
-    // shortcut: dashed
-    if (shortcut) {
-      const p = shortcut.path;
-      g.setLineDash([5, 4]);
-      g.beginPath();
-      for (let i = 0; i < p.n; i += 2) { const [px, py] = this.map(p.x[i], p.z[i]); if (i === 0) g.moveTo(px, py); else g.lineTo(px, py); }
-      g.strokeStyle = 'rgba(0,0,0,0.55)'; g.lineWidth = 6; g.stroke();
-      g.strokeStyle = 'rgba(255,255,255,0.7)'; g.lineWidth = 2.5; g.stroke();
-      g.setLineDash([]);
-    }
     // start line
     const [sx, sy] = this.map(track.x[0], track.z[0]);
     g.fillStyle = accent;

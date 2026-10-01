@@ -1,12 +1,13 @@
 // SUNSET COAST: golden-hour cliffs, palm trees, animated ocean, a lighthouse and sailboats.
 import * as THREE from 'three';
-import { LAYOUTS } from './layouts.js';
+import { LAYOUTS, LAYOUT_SCALE } from './layouts.js';
 import { fbm, makeHeightFn, buildTerrain, mountainRing } from '../terrain.js';
 import { rng, colored, merge, instanced, scatter } from '../scenery.js';
 import { waterMaterial } from '../water.js';
 
 const SEA = -1.2;
-const shoreX = (z) => 430 + 70 * Math.sin(z * 0.0042 + 0.6) + 30 * Math.sin(z * 0.013);
+const shoreZ = (z) => z / LAYOUT_SCALE;
+const shoreX = (z) => LAYOUT_SCALE * (430 + 70 * Math.sin(shoreZ(z) * 0.0042 + 0.6) + 30 * Math.sin(shoreZ(z) * 0.013));
 
 function natural(x, z) {
   const d = shoreX(z) - x; // + inland

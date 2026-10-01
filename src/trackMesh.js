@@ -52,11 +52,12 @@ function fixWinding(g, wantUp) {
 }
 
 // asphalt: { map, normalMap, roughnessMap } from getAsphalt()
-export function buildTrackMeshes(track, style, maxAniso, asphalt, shortcut = null) {
+// shortcuts: ShortcutSet (or null)
+export function buildTrackMeshes(track, style, maxAniso, asphalt, shortcuts = null) {
   const group = new THREE.Group();
   const hw = track.halfWidth;
   // per side: which main-road samples keep their roadside (no gap for the shortcut)
-  const sideKeep = (side) => (shortcut && shortcut.side === side ? (i) => !shortcut.mainGap[i] : null);
+  const sideKeep = (side) => (shortcuts ? shortcuts.mainKeep(side) : null);
 
   // Road: procedural asphalt (albedo + normal + roughness) plus world-space grit and tone variation
   const at = asphalt;
@@ -114,7 +115,7 @@ export function buildTrackMeshes(track, style, maxAniso, asphalt, shortcut = nul
   // Barriers
   addBarriers(group, track, style.barrier, hw + 0.5, sideKeep, true);
 
-  if (shortcut) group.add(buildShortcut(shortcut, style));
+  if (shortcuts) for (const sc of shortcuts.list) group.add(buildShortcut(sc, style));
 
   // Start / finish
   const p0 = track.pointAt(0, 0);
@@ -247,6 +248,9 @@ function buildShortcut(sc, style) {
   }
   addBarriers(group, path, style.barrier, shw + 0.5, keepFor, false);
 
+  for (const r of sc.ramps) group.add(rampMesh(path, r, shw));
+  if (sc.fence) return group; // hidden shortcuts: no sign, a fence across the way in instead
+
   // sign at the fork
   const u = Math.min(path.length * 0.3, sc.overlapIn + 10);
   const p = path.pointAt(u, -sc.side * (shw + 1.8));
@@ -266,4 +270,67 @@ function buildShortcut(sc, style) {
   sign.rotation.y = Math.atan2(back.x - p.x, back.z - p.z);
   group.add(sign);
   return group;
+}
+
+// Ramp texture: wooden planks with a hazard band at the lip.
+let rampTex = null;
+function rampTexture() {
+  if (rampTex) return rampTex;
+  const c = document.createElement('canvas');
+  c.width = 256; c.height = 256;
+  const g = c.getContext('2d');
+  for (let i = 0; i < 16; i++) {
+    const l = 92 + ((i * 37) % 23);
+    g.fillStyle = `rgb(${l + 40},${l + 10},${l - 30})`;
+    g.fillRect(0, i * 16, 256, 15);
+    g.fillStyle = 'rgba(0,0,0,0.35)';
+    g.fillRect(0, i * 16 + 15, 256, 1);
+  }
+  // hazard stripes at the lip end (v = 1 at the top of the canvas)
+  for (let x = -64; x < 256; x += 32) {
+    g.fillStyle = '#f2c21a';
+    g.beginPath(); g.moveTo(x, 0); g.lineTo(x + 16, 0); g.lineTo(x + 48, 36); g.lineTo(x + 32, 36); g.closePath(); g.fill();
+  }
+  g.fillStyle = 'rgba(0,0,0,0.85)';
+  g.fillRect(0, 36, 256, 4);
+  rampTex = new THREE.CanvasTexture(c);
+  rampTex.colorSpace = THREE.SRGBColorSpace;
+  return rampTex;
+}
+
+// A kicker on the shortcut: a sloped deck rising to height r.h, ending in a vertical drop.
+// Half ramps cover one side of the road (r.half = -1 / +1).
+function rampMesh(path, r, shw) {
+  const lat0 = r.half > 0 ? -0.3 : -shw, lat1 = r.half < 0 ? 0.3 : shw;
+  const pos = [], uv = [], idx = [];
+  const n = Math.max(4, Math.ceil(r.len / 0.5));
+  const P = {};
+  const vert = (u, lat, h, uu, vv) => { path.pointAt(u, lat, P); pos.push(P.x, P.y + h - 0.02, P.z); uv.push(uu, vv); return pos.length / 3 - 1; };
+  // deck
+  for (let i = 0; i <= n; i++) {
+    const k = i / n, u = r.u0 + r.len * k, h = r.h * k;
+    vert(u, lat0, h, 0, k); vert(u, lat1, h, 1, k);
+    if (i < n) { const p = i * 2; idx.push(p, p + 1, p + 2, p + 1, p + 3, p + 2); }
+  }
+  // lip face and the two sides
+  const end = r.u0 + r.len;
+  const a = vert(end, lat0, r.h, 0, 0.9), b = vert(end, lat1, r.h, 1, 0.9), c = vert(end, lat1, 0, 1, 0.6), d = vert(end, lat0, 0, 0, 0.6);
+  idx.push(a, c, b, a, d, c);
+  for (const lat of [lat0, lat1]) {
+    const base = pos.length / 3;
+    for (let i = 0; i <= n; i++) {
+      const k = i / n, u = r.u0 + r.len * k;
+      vert(u, lat, r.h * k, k, 0.5); vert(u, lat, 0, k, 0.4);
+      if (i < n) { const p = base + i * 2; idx.push(p, p + 2, p + 1, p + 1, p + 2, p + 3); }
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ map: rampTexture(), roughness: 0.85, side: THREE.DoubleSide }));
+  m.castShadow = true;
+  m.receiveShadow = true;
+  return m;
 }

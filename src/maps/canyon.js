@@ -128,10 +128,7 @@ export default {
     for (let s = 0; s < track.length; s += 55) {
       const p = track.pointAt(s, hw + 9);
       // no poles in the shortcut's fork or on its road
-      if (shortcut) {
-        const q = shortcut.path.project(p.x, p.z);
-        if (shortcut.isGap(s, 1) || (q.beyond === 0 && Math.abs(q.lateral) < shortcut.path.halfWidth + 4)) { prev = null; continue; }
-      }
+      if (shortcut && (shortcut.isGap(s, 1) || shortcut.near(p.x, p.z, 4))) { prev = null; continue; }
       const top = { x: p.x, y: p.y + 9, z: p.z };
       poles.push({ x: p.x, y: p.y + 4.5, z: p.z, ry: p.heading });
       if (prev) {
