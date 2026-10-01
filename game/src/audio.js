@@ -268,6 +268,10 @@ export class AudioEngine {
     n.start(t, Math.random()); n.stop(t + 0.12);
   }
 
+  // app in the background: stop all sound (resume() brings it back)
+  suspend() { if (this.ctx && this.ctx.state === 'running') this.ctx.suspend(); }
+  resume() { if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume(); }
+
   silenceEngine() {
     if (!this.ctx) return;
     for (let i = 0; i < this.engines.length; i++) this.updateEngine({ speed: 0, top: 1, throttle: 0, boost: 0, slip: 0, scraping: 0, active: false }, i);
