@@ -309,11 +309,6 @@ body.menu-cursor #ui .screen.show { pointer-events: auto; }
 .swatches i.locked::after { content: '🔒'; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 1.8vh; transform: skewX(14deg); font-style: normal; }
 .swatches i.chrome, .swatches i.metal { background-image: linear-gradient(135deg, rgba(255,255,255,0.7), rgba(255,255,255,0) 45%, rgba(0,0,0,0.3)) !important; }
 
-/* ---------- results extras + replay ---------- */
+/* ---------- results extras ---------- */
 .r-extra { position: absolute; left: 6vw; top: 13.5vh; display: flex; gap: 1.2vh; flex-wrap: wrap; }
 .r-extra span { font-size: 1.8vh; letter-spacing: 0.15em; padding: 0.5vh 1.4vh; background: rgba(255,212,0,0.15); border: 0.2vh solid var(--yellow); color: var(--yellow); transform: skewX(-12deg); }
-.r-replay { position: absolute; right: 4vw; bottom: 17vh; font-size: 1.8vh; letter-spacing: 0.2em; text-align: right; }
-.r-replay b { display: block; font-size: 2.4vh; color: var(--hot); animation: blink 1.4s infinite; }
-#s-results.replay { background: linear-gradient(90deg, rgba(0,0,0,0.25), rgba(0,0,0,0) 60%); }
-#s-results.replay .results { left: 4vw; top: 20vh; transform: scale(0.7); transform-origin: left top; }
-#s-results.replay .rrow:not(.me) { background: rgba(8, 9, 14, 0.55); }

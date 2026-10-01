@@ -35,12 +35,13 @@ export class TrackIndex {
 // Nearest of several indexes (main road + shortcut), same interface as TrackIndex.
 export class CompositeIndex {
   constructor(list) { this.list = list; }
+  // where two roads come close (a shortcut's fork / merge) the height is the lower road's, so
+  // the terrain never pokes through either surface
   nearest(x, z, radiusCells = 3) {
-    let best = null;
-    for (const ix of this.list) {
-      const n = ix.nearest(x, z, radiusCells);
-      if (!best || n.dist < best.dist) best = n;
-    }
-    return best;
+    let best = null, low = Infinity;
+    const all = this.list.map((ix) => ix.nearest(x, z, radiusCells));
+    for (const n of all) if (!best || n.dist < best.dist) best = n;
+    for (const n of all) if (n.dist < best.dist + 30) low = Math.min(low, n.y);
+    return isFinite(low) ? { ...best, y: low } : best;
   }
 }

@@ -43,7 +43,10 @@ export class Vehicle {
     this.yawRate = 0; this.steer = 0;
     this.drifting = false;
     this.wrecked = false;
-    this.onSC = false; // on the shortcut (see RaceSession.constrainCar)
+    this.onSC = false; // on a shortcut (see shortcut.js constrainOnRoads)
+    this.sc = null;
+    this.air = false; this.trick = null; this.trickYaw = 0; this.trickRoll = 0;
+    this.lastGround = undefined; this.vyGround = 0;
     this.idx = p.idx;
     this.bodyPitch = this.bodyRoll = 0;
     this.constrain(track);
@@ -52,6 +55,16 @@ export class Vehicle {
   update(dt, c, mul = 1) {
     if (this.wrecked) { this.updateWreck(dt); return; }
     if (this.ghost > 0) this.ghost -= dt;
+    this.inHandbrake = !!c.handbrake; // read at take-off (ramp tricks)
+    this.inSteer = c.steer;
+    if (this.air) {
+      // flying off a ramp: no grip, no steering, momentum carries the car
+      this.boosting = !!c.boost;
+      this.x += this.vx * dt;
+      this.z += this.vz * dt;
+      this.wheelSpin += (this.vF / 0.36) * dt;
+      return;
+    }
     const sp = this.spec;
     this.boosting = !!c.boost;
     this.throttle = c.throttle;

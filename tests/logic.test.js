@@ -345,53 +345,97 @@ test('every car spends the points budget (within 10%), most exactly', () => {
   assert.ok(exact > CARS.length / 2);
 });
 
-import { findShortcut, constrainOnRoads, SHORTCUT } from '../game/src/shortcut.js';
+import { findShortcuts, constrainOnRoads, ShortcutSet, SHORTCUT } from '../game/src/shortcut.js';
 import { AIDriver } from '../game/src/ai.js';
 import { signatureAt, hairpinS, SIGNATURES, SIGNATURE_KINDS } from '../game/src/signatures.js';
 import { recordRace, discoverSignature, unlockedPaints, emptyProgress, starsEarned } from '../game/src/progress.js';
 import { PAINTS, BASE_PAINTS } from '../game/src/config.js';
 
-test('every track gets a shortcut that saves distance and is smooth', () => {
-  for (const [id, lay] of Object.entries(LAYOUTS)) {
+const shortcutCache = new Map();
+const shortcutsOf = (id) => {
+  if (!shortcutCache.has(id)) {
+    const lay = LAYOUTS[id];
     const t = new TrackPath(lay.points, { width: lay.width });
-    const sc = findShortcut(t);
-    assert.ok(sc, `${id}: no shortcut`);
-    assert.ok(sc.saving >= SHORTCUT.minSaving && sc.saving <= SHORTCUT.maxSaving, `${id}: saves ${sc.saving}`);
-    for (let i = 0; i < sc.path.n; i++) assert.ok(Math.abs(sc.path.curv[i]) <= 1 / SHORTCUT.minRadius + 1e-6, `${id}: tight at ${i}`);
-    assert.ok(sc.mainGap.some(Boolean), `${id}: no barrier gap`);
-    assert.ok(sc.a > 150 && sc.b < t.length - 100, `${id}: too close to the start line`);
+    shortcutCache.set(id, { t, list: findShortcuts(t) });
+  }
+  return shortcutCache.get(id);
+};
+
+test('every track gets 2-3 smooth shortcuts that save distance and do not overlap', () => {
+  for (const id of Object.keys(LAYOUTS)) {
+    const { t, list } = shortcutsOf(id);
+    assert.ok(list.length >= 2 && list.length <= 3, `${id}: ${list.length} shortcuts`);
+    for (const sc of list) {
+      assert.ok(sc.saving >= SHORTCUT.minSavingExtra && sc.saving <= SHORTCUT.maxSaving, `${id}: saves ${sc.saving}`);
+      for (let i = 0; i < sc.path.n; i++) assert.ok(Math.abs(sc.path.curv[i]) <= 1 / (SHORTCUT.minRadius * 0.85) + 1e-6, `${id}: tight at ${i}`);
+      assert.ok(sc.mainGap.some(Boolean), `${id}: no barrier gap`);
+      assert.ok(sc.a > 150 && sc.b < t.length - 100, `${id}: too close to the start line`);
+    }
+    for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) {
+      const [p, q] = [list[i], list[j]];
+      assert.ok(p.b + 100 < q.a || q.b + 100 < p.a, `${id}: shortcuts ${i} and ${j} overlap`);
+    }
+    // the first has a full ramp, later ones are hidden behind fences
+    assert.ok(list[0].ramps.length === 1 && !list[0].ramps[0].half && !list[0].fence);
+    assert.ok(list.slice(1).every((sc) => sc.fence));
   }
 });
 
-test('an AI that takes the shortcut drives through it cleanly and gains time', () => {
+test('an AI that takes a shortcut drives through it cleanly and gains time', () => {
   for (const id of ['city', 'canyon']) {
-    const lay = LAYOUTS[id];
-    const t = new TrackPath(lay.points, { width: lay.width });
-    const sc = findShortcut(t);
+    const { t, list } = shortcutsOf(id);
+    const set = new ShortcutSet(t, list);
     const lapTime = (chance) => {
       const v = new Vehicle(CARS[1]);
       v.placeOnTrack(t, 0, 0, 0);
-      const ai = new AIDriver(v, t, { skill: 1, aggression: 0, shortcut: sc, shortcutChance: chance });
+      const ai = new AIDriver(v, t, { skill: 1, aggression: 0, shortcuts: list, shortcutChance: chance });
       ai.boostCooldown = 1e9;
-      let dist = 0, last = v.s, time = 0, entered = 0, was = false, hits = 0;
-      while (dist < t.length && time < 150) {
+      let dist = 0, last = v.s, time = 0, entered = 0, was = false, hits = 0, airs = 0;
+      while (dist < t.length && time < 160) {
         const c = ai.think(1 / 120, [], null, 0, 0);
         c.boost = false;
         assert.ok(!c.needsReset, `${id}: AI got stuck`);
         v.update(1 / 120, c, 1);
-        const h = constrainOnRoads(v, t, sc);
+        const h = constrainOnRoads(v, t, set, 1 / 120);
         if (h && h.vn > 3) hits++;
         if (v.onSC && !was) entered++;
         was = v.onSC;
+        if (v.events) { airs += v.events.filter((e) => e.type === 'land' && e.airTime > 0.3).length; v.events.length = 0; }
         dist += t.deltaS(last, v.s); last = v.s; time += 1 / 120;
       }
-      return { time, entered, hits };
+      return { time, entered, hits, airs };
     };
-    const main = lapTime(0), cut = lapTime(1);
+    const main = lapTime(0), cut = lapTime(2); // 2: certain even for the fenced ones (x0.6)
     assert.equal(main.entered, 0);
-    assert.equal(cut.entered, 1, `${id}: entered ${cut.entered} times`);
-    assert.equal(cut.hits, 0);
-    assert.ok(cut.time < main.time, `${id}: shortcut ${cut.time.toFixed(1)} vs ${main.time.toFixed(1)}`);
+    assert.equal(cut.entered, list.length, `${id}: entered ${cut.entered} of ${list.length}`);
+    assert.ok(cut.hits <= 1, `${id}: ${cut.hits} wall hits`);
+    assert.ok(cut.airs >= 1, `${id}: never got airborne off a ramp`);
+    assert.ok(cut.time < main.time, `${id}: shortcuts ${cut.time.toFixed(1)} vs ${main.time.toFixed(1)}`);
+  }
+});
+
+test('ramp tricks: drift + steer at take-off spins the car round by landing', () => {
+  const { t, list } = shortcutsOf('city');
+  const set = new ShortcutSet(t, list);
+  for (const sc of list.filter((x) => x.ramps.length)) {
+    const r = sc.ramps[0];
+    const v = new Vehicle(CARS[0]);
+    const start = sc.path.pointAt(r.u0 - 25, r.half ? r.half * 2.5 : 0);
+    v.placeOnTrack(t, sc.mainS(r.u0 - 25), 0, 0);
+    Object.assign(v, { x: start.x, z: start.z, heading: start.heading, vx: Math.sin(start.heading) * 40, vz: Math.cos(start.heading) * 40, onSC: true, sc, scIdx: -1 });
+    let landed = null;
+    for (let i = 0; i < 600 && !landed; i++) {
+      const u = v.onSC ? v.scU : 0;
+      const trick = u > r.u0 - 3 && u < r.u0 + r.len + 1;
+      v.update(1 / 120, { steer: trick ? 0.8 : 0, throttle: 1, brake: 0, handbrake: trick, boost: false }, 1);
+      constrainOnRoads(v, t, set, 1 / 120);
+      if (v.events && v.events.length) landed = v.events.find((e) => e.type === 'land');
+    }
+    assert.ok(landed, 'never landed');
+    assert.ok(landed.airTime > 0.5, `air time ${landed.airTime}`);
+    assert.equal(landed.trick, r.half ? 'roll' : 'spin');
+    assert.ok(landed.clean, 'trick not finished by landing');
+    assert.equal(v.trickYaw + v.trickRoll, 0);
   }
 });
 

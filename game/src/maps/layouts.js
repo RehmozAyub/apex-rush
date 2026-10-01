@@ -55,7 +55,10 @@ function filleted(corners, radius, y = () => 0, spacing = 45) {
   return out.map(([x, z]) => [x, y(x, z), z]);
 }
 
-export const LAYOUTS = {
+// Every layout is scaled up from its design size (longer laps, room for the shortcuts).
+export const LAYOUT_SCALE = 1.2;
+
+const LAYOUTS_BASE = {
   coast: {
     width: 20,
     points: radial({
@@ -120,3 +123,7 @@ export const LAYOUTS = {
     }),
   },
 };
+
+export const LAYOUTS = Object.fromEntries(Object.entries(LAYOUTS_BASE).map(([id, l]) => [
+  id, { ...l, points: l.points.map(([x, y, z]) => [x * LAYOUT_SCALE, y, z * LAYOUT_SCALE]) },
+]));

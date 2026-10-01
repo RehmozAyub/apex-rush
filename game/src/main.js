@@ -91,7 +91,7 @@ class Game {
     const w = MAPS[i].weather;
     this.audio.setAmbience(w ? (w.type === 'rain' ? 'rain' : 'wind') : null);
     this.renderer.setScene(world.scene, { bloom: MAPS[i].bloom, exposure: MAPS[i].exposure });
-    for (const m of this.minimaps) m.setTrack(world.track, MAPS[i].trackStyle.accent, world.shortcut);
+    for (const m of this.minimaps) m.setTrack(world.track, MAPS[i].trackStyle.accent);
     this.buildShowroom();
     this.world.update(0, 0, this.showroomCar, this.renderer.camera);
     this.renderer.renderer.compile(world.scene, this.renderer.camera);
@@ -129,7 +129,7 @@ class Game {
     this.minimaps = this.ui.setViews(n).map((c) => new Minimap(c));
     if (this.world) {
       this.world.setViewCount(n);
-      for (const m of this.minimaps) m.setTrack(this.world.track, this.world.def.trackStyle.accent, this.world.shortcut);
+      for (const m of this.minimaps) m.setTrack(this.world.track, this.world.def.trackStyle.accent);
     }
     this.renderer.onView = n > 1 ? (i) => {
       const H = this.session && this.session.humans[i];
@@ -388,14 +388,8 @@ class Game {
       for (const p of got.paints) extras.push(`NEW PAINT: ${p.name.toUpperCase()}`);
     }
     saveSettings(this.settings);
-    // replay the best takedown behind the results
-    const clip = this.session.startReplay();
-    if (clip) {
-      if (this.players > 1) this.setViews(1);
-      this.ui.overlay('hud', false);
-    }
-    const replay = clip ? `${clip.label !== 'TAKEDOWN' ? clip.label + ' · ' : ''}${clip.name}` : '';
-    this.ui.results(list, `${head} <small style="font-size:3vh;opacity:.8">&nbsp; ${tds}</small>${record}`, extras, replay);
+    this.ui.results(list, `${head} <small style="font-size:3vh;opacity:.8">&nbsp; ${tds}</small>${record}`, extras);
+    this.resultsFinished = this.session.race.finishOrder.length;
     this.state = 'results';
     this.menuIndex.results = 1; // NEXT TRACK is the default
     this.ui.show('results');
@@ -560,8 +554,7 @@ class Game {
     if (this.session) this.session.autopilot = controls === 'auto';
     this.input.override = controls === 'auto' ? null : controls;
     for (let i = 0; i < frames; i++) {
-      if (this.session && this.session.replaying) this.session.updateReplay(dt);
-      else if (this.session && (this.state === 'race' || this.state === 'results')) this.session.update(dt);
+      if (this.session && (this.state === 'race' || this.state === 'results')) this.session.update(dt);
     }
     this.input.override = null;
     this.renderer.render(this.time);
@@ -586,8 +579,10 @@ class Game {
     } else if (this.session && (this.state === 'pause' || (this.state === 'settings' && this.settingsFrom === 'pause'))) {
       // frozen
     } else if (this.session && this.state === 'results') {
-      if (this.session.replaying) this.session.updateReplay(realDt);
-      else this.session.update(realDt);
+      this.session.update(realDt);
+      // rivals still crossing the line: fill in their times
+      const n = this.session.race.finishOrder.length;
+      if (n !== this.resultsFinished) { this.resultsFinished = n; this.ui.resultRows(this.session.results()); }
     } else if (this.world && this.showroomCar) {
       this.rig.updateOrbit(realDt, this.showroomCar, this.time);
       this.world.update(realDt, this.time, this.showroomCar, cam);

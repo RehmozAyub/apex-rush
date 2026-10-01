@@ -173,6 +173,9 @@ export class PickupVisuals {
     this.oilMat = new THREE.MeshStandardMaterial({ color: 0x040405, roughness: 0.5, metalness: 0, envMapIntensity: 0.2, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
     this.oilEdgeMat = new THREE.MeshBasicMaterial({ map: oilSheenTexture(), transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 });
     this.oilGeo = new THREE.CircleGeometry(1, 28).rotateX(-Math.PI / 2);
+    // a faint pale rim that glints now and then, and a ripple when the spill lands: enough to
+    // spot it on a dark night road or bright desert asphalt without shouting about it
+    this.rimGeo = new THREE.RingGeometry(0.9, 1, 48).rotateX(-Math.PI / 2);
     this.slicks = new Map();
   }
 
@@ -218,6 +221,19 @@ export class PickupVisuals {
     edge.scale.set(halfLat * 1.05, 1, halfS * 1.1);
     edge.position.y = 0.11;
     g.add(edge);
+    const add = (opacity) => new THREE.MeshBasicMaterial({ color: 0xdce6ff, transparent: true, opacity, blending: THREE.AdditiveBlending, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -5, polygonOffsetUnits: -5 });
+    const rim = new THREE.Mesh(this.rimGeo, add(0.1));
+    rim.scale.set(halfLat * 1.08, 1, halfS * 1.12);
+    rim.position.y = 0.12;
+    g.add(rim);
+    const ripple = new THREE.Mesh(this.rimGeo, add(0.3));
+    ripple.position.y = 0.13;
+    g.add(ripple);
+    g.userData.rim = rim;
+    g.userData.ripple = ripple;
+    g.userData.size = [halfLat, halfS];
+    g.userData.age = 0;
+    g.userData.phase = Math.random() * 6;
     g.position.set(x, y, z);
     g.rotation.y = heading;
     g.scale.setScalar(0.01);
@@ -228,7 +244,11 @@ export class PickupVisuals {
 
   removeSlick(id) {
     const g = this.slicks.get(id);
-    if (g) { this.scene.remove(g); this.slicks.delete(id); }
+    if (!g) return;
+    this.scene.remove(g);
+    g.userData.rim.material.dispose();
+    g.userData.ripple.material.dispose();
+    this.slicks.delete(id);
   }
 
   setActive(it, on) {
@@ -297,10 +317,20 @@ export class PickupVisuals {
       if (this.boltT > 0.45) { this.boltT = -1; this.bolt.visible = false; }
     }
     for (const g of this.slicks.values()) {
-      if (g.userData.grow < 1) {
-        g.userData.grow = Math.min(1, g.userData.grow + dt * 4);
-        g.scale.setScalar(0.3 + 0.7 * (1 - Math.pow(1 - g.userData.grow, 3)));
+      const u = g.userData;
+      if (u.grow < 1) {
+        u.grow = Math.min(1, u.grow + dt * 4);
+        g.scale.setScalar(0.3 + 0.7 * (1 - Math.pow(1 - u.grow, 3)));
       }
+      u.age += dt;
+      // slow glint travelling round the rim
+      const glint = Math.pow(0.5 + 0.5 * Math.sin(time * 3.2 + u.phase), 3);
+      u.rim.material.opacity = 0.06 + glint * 0.14;
+      // one ripple spreading out as it splashes down
+      const k = Math.min(1, u.age / 0.6);
+      u.ripple.visible = k < 1;
+      u.ripple.scale.set(u.size[0] * (0.4 + k * 1.1), 1, u.size[1] * (0.4 + k * 1.1));
+      u.ripple.material.opacity = 0.35 * (1 - k);
     }
   }
 
@@ -310,6 +340,7 @@ export class PickupVisuals {
     for (const g of this.shotGeos) g.dispose();
     for (const id of [...this.slicks.keys()]) this.removeSlick(id);
     this.oilGeo.dispose();
+    this.rimGeo.dispose();
     for (const g of this.geos) g.dispose();
     this.boltGeo.dispose();
     const typeMats = Object.values(this.types).flatMap((T) => Object.values(T));

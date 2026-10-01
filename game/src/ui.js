@@ -73,7 +73,7 @@ export class UI {
             <h2>DRIVE ASSIST</h2>
             <p>On by default: you steer, it helps. It nudges you away from the walls, calms over-steering, brakes for bends you'd miss and makes wall hits less punishing. Press <b>H</b> in a race (or use the pause menu) to drive fully manual.</p>
             <h2>RIVALS &amp; SECRETS</h2>
-            <p>Whoever wrecks you becomes your <b>RIVAL</b>: take them out for a big <b>PAYBACK</b> boost. Every track hides a <b>shortcut</b> and four <b>signature takedown</b> spots. Earn <b>three stars</b> per track (win, 5 takedowns, no crashes) and unlock new paints with takedowns and stars.</p>
+            <p>Whoever wrecks you becomes your <b>RIVAL</b>: take them out for a big <b>PAYBACK</b> boost. Every track hides <b>shortcuts</b> (some behind fences, some with <b>ramps</b>: hold drift and steer as you take off for a spin or barrel roll) and four <b>signature takedown</b> spots. Earn <b>three stars</b> per track (win, 5 takedowns, no crashes) and unlock new paints with takedowns and stars.</p>
             <h2>POWER-UPS</h2>
             <p class="note">Every block shows what's inside. Drive through one to grab it (a new one replaces the one you hold). Rivals use them too.</p>
             ${POWER_IDS.map((id) => `<p class="pw">${icon(id)}<b style="color:${POWERS[id].color}">${POWERS[id].name}</b> ${POWERS[id].desc.toLowerCase()}</p>`).join('')}
@@ -105,7 +105,6 @@ export class UI {
       <section id="s-results" class="screen dim">
         <h1 class="head" id="r-head"><b>RESULTS</b></h1>
         <div class="r-extra" id="r-extra"></div>
-        <div class="r-replay" id="r-replay"></div>
         <div class="results" id="results"></div>
         <div class="menu row" id="m-results"></div>
       </section>
@@ -320,16 +319,30 @@ export class UI {
     setTimeout(() => c.remove(), 4800);
   }
 
-  // headline: html; extras: lines under it (new stars, paints); replay: label for the replay or ''
-  results(list, headline, extras = [], replay = '') {
+  // headline: html; extras: lines under it (new stars, paints)
+  results(list, headline, extras = []) {
     $('#r-head').innerHTML = headline;
     $('#r-extra').innerHTML = extras.map((x) => `<span>${x}</span>`).join('');
-    $('#r-replay').innerHTML = replay ? `<b>TAKEDOWN REPLAY</b> ${replay}` : '';
-    this.screens.results.classList.toggle('replay', !!replay);
-    $('#results').innerHTML = `<div class="rrow hdr"><span>POS</span><span>DRIVER</span><span>CAR</span><span>TIME</span><span>BEST LAP</span><span>TAKEDOWNS</span></div>` +
-      list.map((r) => `<div class="rrow${r.isPlayer ? ' me' : ''}" style="--c:#${r.paint.toString(16).padStart(6, '0')}">
-        <span class="p">${r.pos}</span><span class="n"><i></i>${r.name}</span><span>${r.car}</span>
-        <span>${r.time !== null ? formatTime(r.time) : '—'}</span><span>${formatTime(r.best)}</span><span>${r.takedowns ?? ''}</span></div>`).join('');
+    $('#results').innerHTML = ''; // a new race: rows animate in again
+    this.resultRows(list);
+  }
+
+  // (re)fill the results table; rows already shown are updated in place (no re-animation)
+  resultRows(list) {
+    const el = $('#results');
+    const cells = (r) => `<span class="p">${r.pos}</span><span class="n"><i></i>${r.name}</span><span>${r.car}</span>
+        <span>${r.time !== null ? formatTime(r.time) : '—'}</span><span>${formatTime(r.best)}</span><span>${r.takedowns ?? ''}</span>`;
+    const rows = el.querySelectorAll('.rrow:not(.hdr)');
+    if (rows.length === list.length) {
+      list.forEach((r, i) => {
+        rows[i].className = `rrow${r.isPlayer ? ' me' : ''}`;
+        rows[i].style.setProperty('--c', '#' + r.paint.toString(16).padStart(6, '0'));
+        rows[i].innerHTML = cells(r);
+      });
+      return;
+    }
+    el.innerHTML = `<div class="rrow hdr"><span>POS</span><span>DRIVER</span><span>CAR</span><span>TIME</span><span>BEST LAP</span><span>TAKEDOWNS</span></div>` +
+      list.map((r) => `<div class="rrow${r.isPlayer ? ' me' : ''}" style="--c:#${r.paint.toString(16).padStart(6, '0')}">${cells(r)}</div>`).join('');
   }
 
   error(msg) {

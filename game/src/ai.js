@@ -1,13 +1,13 @@
 // AI driver: follows a racing line with look-ahead steering, brakes for curvature, avoids
 // traffic, rubber-bands to the player, boosts on straights and sometimes rams the player.
-// Some laps it takes the track's shortcut.
+// Some laps it takes one of the track's shortcuts.
 import { wrapAngle } from './trackMath.js';
 
 export class AIDriver {
-  constructor(vehicle, track, { lane = 0, skill = 1, aggression = 0.3, refTopSpeed = null, shortcut = null, shortcutChance = 0.4 } = {}) {
-    this.sc = shortcut;
+  constructor(vehicle, track, { lane = 0, skill = 1, aggression = 0.3, refTopSpeed = null, shortcuts = [], shortcutChance = 0.4 } = {}) {
+    this.scs = shortcuts;
     this.scChance = shortcutChance;
-    this.scPlan = null; // this lap: take the shortcut? (null = not decided yet)
+    this.scPlans = new Map(); // shortcut -> take it this lap? (decided on the approach)
     this.pq = {};
     // pull AI cars most of the way toward the player's car performance so no pick is unwinnable
     // (fully for slow player cars, only a little for fast ones so a fast pick still pays off)
@@ -63,15 +63,16 @@ export class AIDriver {
     }
     // shortcut: decide on the approach, line up on its side, then follow it
     let route = track, rs = v.s, lane = null;
-    const sc = this.sc;
-    if (sc && v.onSC) { route = sc.path; rs = v.scU; lane = 0; }
-    else if (sc) {
-      const d = track.deltaS(v.s, sc.a); // + = fork ahead
-      if (d > 220 || d < -60) this.scPlan = null;
-      else if (this.scPlan === null && d > 60) this.scPlan = Math.random() < this.scChance;
-      if (this.scPlan && d < 110 && d > -60) {
-        desired = sc.side * (track.halfWidth - 2.6);
-        if (d < 20) { route = sc.path; rs = sc.path.project(v.x, v.z, -1, this.pq).s; lane = 0; }
+    if (v.onSC && v.sc) { route = v.sc.path; rs = v.scU; lane = 0; }
+    else {
+      for (const sc of this.scs) {
+        const d = track.deltaS(v.s, sc.a); // + = fork ahead
+        if (d > 220 || d < -60) { this.scPlans.delete(sc); continue; }
+        if (!this.scPlans.has(sc) && d > 60) this.scPlans.set(sc, Math.random() < this.scChance * (sc.fence ? 0.6 : 1));
+        if (this.scPlans.get(sc) && d < 110) {
+          desired = sc.side * (track.halfWidth - 2.6);
+          if (d < 20) { route = sc.path; rs = sc.path.project(v.x, v.z, -1, this.pq).s; lane = 0; }
+        }
       }
     }
     this.laneTarget += (desired - this.laneTarget) * Math.min(1, dt * 1.8);
@@ -108,7 +109,7 @@ export class AIDriver {
     if (ramming) { throttle = 1; brake = 0; }
 
     // recover when stuck or facing the wrong way
-    const roadDir = v.onSC && sc ? sc.path.headingAt(v.scIdx) : track.headingAt(v.idx);
+    const roadDir = v.onSC && v.sc ? v.sc.path.headingAt(v.scIdx) : track.headingAt(v.idx);
     const backwards = Math.abs(wrapAngle(v.heading - roadDir)) > 1.8;
     if (speed < 3 || backwards) this.stuckTime += dt; else this.stuckTime = 0;
     const needsReset = this.stuckTime > (backwards ? 1.5 : 3);

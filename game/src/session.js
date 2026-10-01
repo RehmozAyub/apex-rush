@@ -15,8 +15,8 @@ import { PickupVisuals } from './pickups.js';
 import { DriveAssist, ASSIST_RULES } from './assist.js';
 import { signatureAt, hairpinS } from './signatures.js';
 import { constrainOnRoads } from './shortcut.js';
+import { FenceProps } from './props.js';
 import { RivalMarkers } from './markers.js';
-import { ReplayRecorder, applyClip } from './replay.js';
 
 // what a human sees when a power-up (or a rival) wrecks them
 const VICTIM_LABEL = { 'TAKEDOWN!': 'TAKEN OUT', 'RICOCHET TAKEDOWN': 'RICOCHETED', SHOCKWAVE: 'SHOCKWAVED' };
@@ -31,7 +31,7 @@ export class RaceSession {
     this.world = world;
     this.track = world.track;
     this.def = world.def;
-    this.shortcut = world.shortcut || null;
+    this.shortcuts = world.shortcuts || null; // ShortcutSet
     this.landmark = world.landmark || null;
     this.hairpin = hairpinS(this.track);
     this.tmpP = {}; this.tmpQ = {};
@@ -85,7 +85,7 @@ export class RaceSession {
         id: isPlayer ? (hi === 0 ? 'player' : 'player2') : `ai${ai}`,
         name: isPlayer ? (this.split ? `P${hi + 1}` : 'YOU') : names[ai],
         isPlayer, vehicle: v, model, spec, paint, human: null,
-        ai: isPlayer ? null : new AIDriver(v, this.track, { lane: lat * 0.6, skill: aiSkill[ai % aiSkill.length], aggression: aiAggro[ai % aiAggro.length], refTopSpeed: refTop, shortcut: this.shortcut }),
+        ai: isPlayer ? null : new AIDriver(v, this.track, { lane: lat * 0.6, skill: aiSkill[ai % aiSkill.length], aggression: aiAggro[ai % aiAggro.length], refTopSpeed: refTop, shortcuts: this.shortcuts ? this.shortcuts.list : [] }),
         controls: { steer: 0, throttle: 0, brake: 0, handbrake: false, boost: false },
         power: null, powerTime: 0,
         pushedAt: -99, pushedBy: null, lastContact: -99, prevFwd: [0, 0], respawn: 0, mul: 1,
@@ -109,10 +109,11 @@ export class RaceSession {
 
     // road pickups and power-up objects
     const pickList = layoutPickups(L, this.track.halfWidth);
-    if (this.shortcut) {
-      // a boost ring halfway along the shortcut: a reason to risk it
-      const sp = this.shortcut.path.pointAt(this.shortcut.path.length / 2, 0);
-      pickList.push({ kind: 'boost', s: this.shortcut.mainS(this.shortcut.path.length / 2), lateral: 0, pos: sp });
+    for (const sc of this.shortcuts ? this.shortcuts.list : []) {
+      if (!sc.boostRing) continue;
+      // a boost ring halfway along: a reason to find this one
+      const sp = sc.path.pointAt(sc.path.length / 2, 0);
+      pickList.push({ kind: 'boost', s: sc.mainS(sc.path.length / 2), lateral: 0, pos: sp });
     }
     this.pickState = new PickupState(pickList);
     this.pickVis = new PickupVisuals(world.scene, this.track, this.pickState.items);
@@ -121,8 +122,7 @@ export class RaceSession {
     this.slickId = 0;
     this.pendingStrikes = [];
     this.markers = new RivalMarkers(world.scene, this.humans.length);
-    this.replay = new ReplayRecorder(this.cars.length);
-    this.replaying = null;
+    this.fences = new FenceProps(world.scene, this.shortcuts ? this.shortcuts.list : []);
 
     if (this.def.headlights) {
       for (const H of this.humans) {
@@ -142,6 +142,7 @@ export class RaceSession {
     }
     this.pickVis.dispose();
     this.markers.dispose();
+    this.fences.dispose();
     this.game.audio.setIntensity(0);
     for (const o of [this.fx.skids.mesh, this.fx.smoke.points, this.fx.glow.points, this.fx.debris.mesh]) {
       this.world.scene.remove(o);
@@ -245,7 +246,7 @@ export class RaceSession {
         c.controls = { ...ctl, boost: H.boost.boosting, draft: H.drafting };
         c.mul = 1;
       } else {
-        if (!c.ai) c.ai = new AIDriver(v, this.track, { lane: v.lateral, skill: 0.8, aggression: 0, shortcut: this.shortcut });
+        if (!c.ai) c.ai = new AIDriver(v, this.track, { lane: v.lateral, skill: 0.8, aggression: 0, shortcuts: this.shortcuts ? this.shortcuts.list : [] });
         const me = this.race.byId.get(c.id);
         const target = H ? null : this.nearestHuman(v).H;
         const ctl = c.ai.think(dt, this.cars, target ? target.car.vehicle : null, H ? me.progress : hp, me.progress);
@@ -260,12 +261,16 @@ export class RaceSession {
     const h = dt / steps;
     for (let k = 0; k < steps; k++) {
       for (const c of this.cars) {
-        c.vehicle.update(h, c.controls, c.mul);
-        const hit = this.constrainCar(c);
+        const v = c.vehicle, prevU = v.onSC ? v.scU : -1, prevSC = v.sc;
+        v.update(h, c.controls, c.mul);
+        const hit = this.constrainCar(c, h);
         if (hit) this.onWallHit(c, hit);
+        if (v.onSC && v.sc === prevSC && v.sc.fence && this.fences.hit(v.sc, prevU, v.scU, v)) this.onFence(c);
       }
       this.collide();
     }
+    for (const c of this.cars) if (c.vehicle.events && c.vehicle.events.length) this.onAirEvents(c);
+    this.fences.update(dt, this.cars);
 
     for (const c of this.cars) {
       if (!c.vehicle.wrecked) continue;
@@ -278,7 +283,6 @@ export class RaceSession {
     this.pickVis.update(dt, this.time);
     this.updateFx(dt);
     this.syncModels();
-    if (racing) this.replay.record(this.time, this.cars);
     this.updatePresentation(realDt, dt);
   }
 
@@ -287,45 +291,44 @@ export class RaceSession {
   // roads is open, and a car crossing that edge switches roads. On the shortcut, v.s is mapped
   // back onto the main road (so race progress keeps working) and v.scU / v.scIdx hold the
   // position along the shortcut.
-  constrainCar(c) {
-    return constrainOnRoads(c.vehicle, this.track, this.shortcut, this.tmpP, this.tmpQ);
+  constrainCar(c, dt) {
+    return constrainOnRoads(c.vehicle, this.track, this.shortcuts, dt, this.tmpP, this.tmpQ);
+  }
+
+  // smashed through a fence into a hidden shortcut
+  onFence(c) {
+    const v = c.vehicle;
+    v.vx *= 0.94; v.vz *= 0.94;
+    this.fx.sparks(v.x + Math.sin(v.heading) * 2, v.y + 0.8, v.z + Math.cos(v.heading) * 2, v.vx, v.vz, 10, 0.6);
+    const vol = c.human ? 1 : this.audibility(v);
+    if (vol > 0.05) this.game.audio.impact(0.6 * vol);
+    if (c.human) {
+      c.human.rig.addShake(0.5);
+      this.popup('SMASHED THROUGH', 'SECRET SHORTCUT', 'good', c.human);
+    }
+  }
+
+  // ramps: airtime fills the boost meter; a spin or barrel roll pays extra
+  onAirEvents(c) {
+    const H = c.human, v = c.vehicle;
+    for (const e of v.events) {
+      if (e.type !== 'land') continue;
+      if (e.impact > 6) { this.fx.tyreSmoke(v.x, v.y, v.z, v.vx, v.vz, 1.2); if (H) H.rig.addShake(Math.min(0.6, e.impact / 25)); }
+      if (!H || e.airTime < 0.35) continue;
+      const air = Math.round(e.airTime * 10) / 10;
+      if (e.trick && e.clean) {
+        const name = e.trick === 'roll' ? 'BARREL ROLL' : 'AERIAL DONUT';
+        this.scoreEvent(H, name, H.boost.event(RULES.takedownGain * 0.8 + e.airTime * 10));
+      } else {
+        this.scoreEvent(H, `AIR TIME ${air.toFixed(1)}s`, H.boost.event(8 + e.airTime * 14));
+      }
+    }
+    v.events.length = 0;
   }
 
   // road direction under a car (the shortcut's when it is on it)
   roadHeading(v) {
-    return v.onSC && this.shortcut ? this.shortcut.path.headingAt(v.scIdx) : this.track.headingAt(v.idx);
-  }
-
-  // --- takedown replay (results screen) ----------------------------------------------
-  startReplay() {
-    this.replay.flush();
-    const clip = this.replay.best;
-    if (!clip) return null;
-    this.replaying = { clip, t: clip.t0, boomed: false };
-    for (const c of this.cars) for (const w of c.model.wheels) this.fx.skids.add(c.id + w.side + w.front, 0, 0, 0, 0, 0, false);
-    return clip;
-  }
-
-  updateReplay(realDt) {
-    const R = this.replaying, clip = R.clip;
-    R.t += realDt * 0.45; // slow motion
-    if (R.t > clip.t1) { R.t = clip.t0; R.boomed = false; }
-    applyClip(clip, R.t, this.cars);
-    const victim = this.cars[clip.victim].model.root.position;
-    if (!R.boomed && R.t >= clip.t) {
-      R.boomed = true;
-      const c = this.cars[clip.victim];
-      this.fx.explosion(victim.x, victim.y + 0.6, victim.z, 0, 0, c.paint, victim.y - 0.6);
-      this.game.audio.crash();
-    }
-    this.fx.update(realDt * 0.45);
-    // slow orbit around the victim
-    const cam = this.game.renderer.cameras[0];
-    const a = 0.6 + (R.t - clip.t0) * 0.35;
-    cam.position.set(victim.x + Math.cos(a) * 10, victim.y + 3.4, victim.z + Math.sin(a) * 10);
-    cam.lookAt(victim.x, victim.y + 0.8, victim.z);
-    for (const fx of this.game.renderer.fxs) { fx.blur = 0.15; fx.lines = 0; fx.ca = 0.3; fx.boost = 0; fx.flash = 0; fx.slowmo = 0.6; }
-    this.world.update(realDt, this.time, victim, cam);
+    return v.onSC && v.sc ? v.sc.path.headingAt(v.scIdx) : this.track.headingAt(v.idx);
   }
 
   // per-human race summary for stars and progress
@@ -497,6 +500,11 @@ export class RaceSession {
       const sl = { owner: me, id: ++this.slickId, s, lat, t: R.slickLife };
       this.slicks.push(sl);
       this.pickVis.addSlick(sl.id, p.x, p.y, p.z, p.heading, R.slickHalfS, R.slickHalfLat);
+      for (let k = 0; k < 14; k++) {
+        const a = Math.random() * Math.PI * 2, r = 1.5 + Math.random() * 3;
+        this.fx.smoke.spawn(p.x + Math.cos(a) * 0.6, p.y + 0.3, p.z + Math.sin(a) * 0.6, Math.cos(a) * r, 2.5 + Math.random() * 2.5, Math.sin(a) * r,
+          0.45 + Math.random() * 0.2, 0.22 + Math.random() * 0.15, 0.04, 0.04, 0.05, { drag: 0.2, grav: 14, alpha: 0.9 });
+      }
       if (vol > 0.02) game.audio.splat(vol);
       if (H) this.popup('OIL SLICK', 'DROPPED BEHIND YOU', 'power', H);
     } else if (kind === 'strike') {
@@ -661,6 +669,7 @@ export class RaceSession {
       for (let j = i + 1; j < cars.length; j++) {
         const A = cars[i].vehicle, B = cars[j].vehicle;
         if (A.ghost > 0 || B.ghost > 0) continue;
+        if (Math.abs(A.y - B.y) > 1.6) continue; // one of them is flying over the other
         if (A.wrecked && B.wrecked) continue;
         const dx0 = B.x - A.x, dz0 = B.z - A.z;
         if (dx0 * dx0 + dz0 * dz0 > 36) continue;
@@ -772,7 +781,6 @@ export class RaceSession {
     let gained = by.boost.event(RULES.takedownGain);
     if (payback) gained += by.boost.add(RULES.takedownGain * 0.7);
     if (sig) gained += by.boost.add(15);
-    this.replay.mark(this.time, { victim: this.cars.indexOf(c), score: 1 + (sig ? 3 : 0) + (payback ? 2 : 0) + Math.min(1, v.speed / 90), label: sig ? sig.name : payback ? 'PAYBACK' : 'TAKEDOWN', name: c.name });
     if (sig) this.game.onSignature(by.index, sig, this.def.id);
     if (quiet && !sig && !payback) return;
     const m = by.boost.multiplier;
@@ -851,15 +859,15 @@ export class RaceSession {
       }
       const fxv = Math.sin(v.heading), fzv = Math.cos(v.heading);
       const rx = -fzv, rz = fxv;
-      const skidding = (v.drifting || Math.abs(v.slip) > 0.2 || (v.braking && v.speed > 25)) && v.speed > 8;
+      const skidding = !v.air && (v.drifting || Math.abs(v.slip) > 0.2 || (v.braking && v.speed > 25)) && v.speed > 8;
       for (const side of [-1, 1]) {
         const wx = v.x + rx * side * 0.95 - fxv * c.model.halfBase;
         const wz = v.z + rz * side * 0.95 - fzv * c.model.halfBase;
         fx.skids.add(c.id + side, wx, v.y, wz, fxv, fzv, skidding);
-        const sliding = v.drifting || Math.abs(v.slip) > 0.28;
+        const sliding = !v.air && (v.drifting || Math.abs(v.slip) > 0.28);
         if (sliding && v.speed > 8 && Math.random() < dt * (v.drifting ? 40 : 14)) fx.tyreSmoke(wx, v.y, wz, v.vx, v.vz, v.drifting ? 1.1 : 0.6);
       }
-      if (spray && v.speed > 16 && this.nearestHuman(v).d2 < 120 * 120 && Math.random() < dt * v.speed * (c.human ? 0.12 : 0.3)) {
+      if (spray && !v.air && v.speed > 16 && this.nearestHuman(v).d2 < 120 * 120 && Math.random() < dt * v.speed * (c.human ? 0.12 : 0.3)) {
         const side = Math.random() < 0.5 ? -1 : 1;
         fx.smoke.spawn(v.x + rx * side * 0.95 - fxv * (c.model.halfBase + 0.4), v.y + 0.3, v.z + rz * side * 0.95 - fzv * (c.model.halfBase + 0.4),
           v.vx * 0.35 + (Math.random() - 0.5) * 2, 1 + Math.random() * 1.5, v.vz * 0.35 + (Math.random() - 0.5) * 2,
@@ -882,7 +890,7 @@ export class RaceSession {
         m.body.rotation.set(0, 0, 0);
         for (const w of m.wheels) w.group.position.y = m.wheelR - 0.6;
       } else {
-        m.root.rotation.set(v.pitch, v.heading, v.roll, 'YXZ');
+        m.root.rotation.set(v.pitch, v.heading + (v.trickYaw || 0), v.roll + (v.trickRoll || 0), 'YXZ');
         m.root.position.set(v.x, v.y, v.z);
         m.body.position.y = m.rideY;
         m.body.rotation.set(v.bodyPitch, 0, v.bodyRoll);
@@ -946,7 +954,7 @@ export class RaceSession {
       game.audio.updateEngine({
         speed: pv.wrecked ? 0 : pv.speed, top: pv.spec.topSpeed,
         throttle: this.state === 'countdown' ? H.input.throttle : pv.wrecked ? 0 : H.car.controls.throttle,
-        boost: H.boostVis, slip: pv.drifting ? Math.min(1, Math.abs(pv.slip) * 2) : Math.max(0, Math.abs(pv.slip) - 0.15) * 2,
+        boost: H.boostVis, slip: pv.air ? 0 : pv.drifting ? Math.min(1, Math.abs(pv.slip) * 2) : Math.max(0, Math.abs(pv.slip) - 0.15) * 2,
         scraping: pv.scraping > 0.5 && pv.speed > 5 ? Math.min(1, pv.speed / 40) : 0,
         active: !pv.wrecked, slowmo: slowmoFx, volume: this.split ? 0.7 : 1, style: pv.spec.style,
       }, H.index);
