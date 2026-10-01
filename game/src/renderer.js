@@ -127,7 +127,7 @@ class View {
     u.uCA.value = fx.ca;
     u.uLines.value = fx.lines;
     u.uBoost.value = fx.boost;
-    u.uFlash.value = fx.flash + (fx.weather || 0) * 0.22;
+    u.uFlash.value = fx.flash + (fx.weather || 0) * 0.12;
     u.uSlowmo.value = fx.slowmo;
     u.uTime.value = time;
     this.composer.render();

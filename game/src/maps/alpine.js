@@ -43,7 +43,7 @@ export default {
   layout: LAYOUTS.alpine,
   exposure: 0.95,
   envIntensity: 1.0,
-  bloom: { strength: 0.32, radius: 0.5, threshold: 1.0 },
+  bloom: { strength: 0.2, radius: 0.45, threshold: 1.15 },
   fog: { color: 0xbcd2e8, density: 0.00045 },
   sky: {
     top: 0x1f5fcf, horizon: 0xcfe4f7, bottom: 0x8aa0b0,

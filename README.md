@@ -10,7 +10,7 @@ Arcade 3D takedown racing in the browser — Burnout-style boost, takedowns and 
 - 6 tracks with their own weather: Sunset Coast, Neon City, Alpine Pass, Whiteout Summit (snowfall), Scorched Canyon (dust storm), Monsoon Jungle (thunderstorm)
 - 6 cars — Viper, Bolt, Raptor, Titan, Phantom, Rogue — each with its own livery and balanced so every pick is competitive; 8 cars per race
 - 6 tracks, or **Random Track** to let the game pick
-- **2-3 secret shortcuts** on every track (some AI rivals take them too): ramps with airtime boost (drift into a jump for a flat spin, keep holding for an aerial donut, or barrel roll off a half ramp), and hidden ones behind wooden fences you smash through
+- **2-3 secret shortcuts** on every track, marked by softly pulsing arrows at the fork (some AI rivals take them too): ramps with airtime boost (drift into a jump for a flat spin, keep holding for an aerial donut, or barrel roll off a half ramp), and hidden ones behind wooden fences you smash through
 - **Rivals:** whoever wrecks you is marked RIVAL; take them out for a PAYBACK boost
 - **Signature takedowns:** four named spots per track; the first one you find snaps a photo of the crash
 - **Three stars per track** (win, 5 takedowns, no crashes) and **earned paints** (takedowns and stars unlock 8 more, including chrome and gold)
