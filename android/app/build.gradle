@@ -1,0 +1,52 @@
+// APEX RUSH Android shell. tools/build-apk.mjs writes local.properties (SDK + signing key)
+// and version.properties before it runs Gradle, and copies game/ into src/main/assets/game.
+plugins {
+    id 'com.android.application'
+}
+
+def props = { String name ->
+    def p = new Properties()
+    file(name).withInputStream { p.load(it) }
+    p
+}
+def local = props('../local.properties')
+def signing = props(local.getProperty('signing'))
+def version = props('../version.properties')
+
+android {
+    namespace 'com.apexrush.game'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'com.apexrush.game'
+        minSdk 24
+        targetSdk 35
+        versionCode version.getProperty('versionCode') as int
+        versionName version.getProperty('versionName')
+    }
+
+    signingConfigs {
+        release {
+            storeFile file(signing.getProperty('storeFile'))
+            storePassword signing.getProperty('storePassword')
+            keyAlias signing.getProperty('keyAlias')
+            keyPassword signing.getProperty('keyPassword')
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.release
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    implementation 'androidx.webkit:webkit:1.12.1'
+}

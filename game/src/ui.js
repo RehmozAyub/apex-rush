@@ -7,6 +7,9 @@ const icon = (id) => `<img class="picon" src="${powerIconURL(id)}" alt="">`;
 
 const $ = (sel, el = document) => el.querySelector(sel);
 
+// touch screens: BACK / NEXT buttons in the corner of a menu screen (they send 'back' / 'confirm')
+const tnav = (go = '') => `<div class="tnav"><b data-a="back">◀ BACK</b>${go ? `<b data-a="confirm" class="go">${go} ▶</b>` : ''}</div>`;
+
 export class UI {
   constructor(root) {
     this.root = root;
@@ -29,6 +32,7 @@ export class UI {
         <h1 class="head"><b>SELECT</b> TRACK</h1>
         <div class="cards" id="cards"></div>
         <div class="hints">← → ↑ ↓ CHOOSE &nbsp;·&nbsp; ENTER CONFIRM &nbsp;·&nbsp; ESC BACK</div>
+        ${tnav('NEXT')}
       </section>
 
       <section id="s-cars" class="screen">
@@ -42,6 +46,7 @@ export class UI {
           <div class="swatches" id="swatches"></div>
         </div>
         <div class="hints">← → CAR &nbsp;·&nbsp; ↑ ↓ PAINT &nbsp;·&nbsp; ENTER RACE &nbsp;·&nbsp; ESC BACK</div>
+        ${tnav('RACE')}
       </section>
 
       <section id="s-settings" class="screen">
@@ -56,6 +61,7 @@ export class UI {
           <div><b>H</b> Drive assist on/off</div><div><b>ESC</b> Pause</div>
           <div class="pad">Gamepad: RT/LT drive · A boost · X drift · LB power-up · Y camera · BACK assist</div>
         </div>
+        ${tnav()}
       </section>
 
       <section id="s-hud" class="screen hud"></section>
@@ -71,7 +77,7 @@ export class UI {
             <h2>TAKEDOWNS</h2>
             <p>Slam a rival hard, or shove them into a wall. Hit a wall head-on or get rammed and you crash.</p>
             <h2>DRIVE ASSIST</h2>
-            <p>On by default: you steer, it helps. It nudges you away from the walls, calms over-steering, brakes for bends you'd miss and makes wall hits less punishing. Press <b>H</b> in a race (or use the pause menu) to drive fully manual.</p>
+            <p>On by default: you steer, it helps. It nudges you away from the walls, calms over-steering, brakes for bends you'd miss and makes wall hits less punishing. <span class="k-in">Press <b>H</b> in a race (or use the pause menu)</span><span class="t-in">Turn it off in the pause menu</span> to drive fully manual.</p>
             <h2>RIVALS &amp; SECRETS</h2>
             <p>Whoever wrecks you becomes your <b>RIVAL</b>: take them out for a big <b>PAYBACK</b> boost. Every track hides <b>shortcuts</b> (some behind fences, some with <b>ramps</b>: drift into the jump for a <b>flat spin</b>, keep holding drift for an <b>aerial donut</b>, or <b>barrel roll</b> off a half ramp) and four <b>signature takedown</b> spots. Earn <b>three stars</b> per track (win, 5 takedowns, no crashes) and unlock new paints with takedowns and stars.</p>
             <h2>POWER-UPS</h2>
@@ -79,6 +85,16 @@ export class UI {
             ${POWER_IDS.map((id) => `<p class="pw">${icon(id)}<b style="color:${POWERS[id].color}">${POWERS[id].name}</b> ${POWERS[id].desc.toLowerCase()}</p>`).join('')}
           </div>
           <div class="col">
+            <div class="touchonly">
+              <h2>TOUCH CONTROLS</h2>
+              <p>The car <b>accelerates by itself</b>. Your left thumb steers, your right thumb does the rest.</p>
+              <p><b>STEER</b> slide your left thumb left or right (how far = how hard), or pick <b>◀ ▶ buttons</b> or <b>tilt</b> in Settings.</p>
+              <p><b>DRIFT</b> hold while you turn into a bend. <b>BRAKE</b> slows you down; hold it when stopped to reverse.</p>
+              <p><b>BOOST</b> tap to fire until the meter runs dry (tap again to stop), or hold it. Tap it before GO for a <b>perfect start</b>.</p>
+              <p><b>POWER</b> shows the power-up you hold: tap to use it.</p>
+              <p><b>↺</b> puts the car back on the road, <b>CAM</b> changes camera, <b>❚❚</b> pauses (so does the phone's back button).</p>
+            </div>
+            <div class="keysonly">
             <h2>CONTROLS</h2>
             <table class="keys">
               <tr><th></th><th>1 PLAYER</th><th>2P · PLAYER 1</th><th>2P · PLAYER 2</th><th>GAMEPAD</th></tr>
@@ -92,9 +108,11 @@ export class UI {
               <tr><td>Pause</td><td>Esc</td><td colspan="2">Esc</td><td>Start</td></tr>
             </table>
             <p class="note">Two gamepads? The first controls player 1, the second player 2. F11 toggles fullscreen.</p>
+            </div>
           </div>
         </div>
         <div class="hints">ENTER / ESC BACK</div>
+        ${tnav()}
       </section>
 
       <section id="s-pause" class="screen dim">
@@ -108,6 +126,8 @@ export class UI {
         <div class="results" id="results"></div>
         <div class="menu row" id="m-results"></div>
       </section>
+
+      <div id="rotate"><div class="phone"></div>ROTATE YOUR PHONE</div>
 
       <section id="s-error" class="screen">
         <h1 class="head"><b>GRAPHICS</b> ERROR</h1>
@@ -203,7 +223,7 @@ export class UI {
   onMenuClick(id, fn) {
     $(`#${id}`).addEventListener('click', (e) => {
       const it = e.target.closest('.item');
-      if (it) fn(Number(it.dataset.i));
+      if (it) fn(Number(it.dataset.i), e);
     });
   }
 

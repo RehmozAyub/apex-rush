@@ -603,3 +603,67 @@ test('fast jumps (with and without tricks) never crash and never hit a wall in t
     assert.equal(landings, runs, `${id}: ${landings} landings from ${runs} jumps`);
   }
 });
+
+// --- phones: touch steering, the boost button, GRAPHICS AUTO ----------------------------------
+import { sliderSteer, tiltAngle, tiltSteer, BoostLatch } from '../game/src/touch.js';
+import { autoQuality } from '../game/src/config.js';
+
+test('thumb slider: dead zone, analog in between, full lock, symmetric', () => {
+  assert.equal(sliderSteer(0, 60), 0);
+  assert.equal(sliderSteer(3, 60), 0);
+  const half = sliderSteer(30, 60);
+  assert.ok(half > 0.3 && half < 0.6, `half travel steers ${half}`);
+  assert.ok(sliderSteer(15, 60) < half && half < sliderSteer(45, 60));
+  assert.equal(sliderSteer(60, 60), 1);
+  assert.equal(sliderSteer(500, 60), 1);
+  assert.equal(sliderSteer(-30, 60), -half);
+});
+
+test('tilt: turning the phone clockwise like a wheel steers right, held either way round', () => {
+  const g = 9.8, deg = Math.PI / 180;
+  // reaction to gravity in device axes (x = right edge, y = top edge in portrait) when the phone
+  // is turned clockwise by phi from how it is held in each orientation
+  const readings = {
+    0: (p) => [-g * Math.sin(p), g * Math.cos(p)], // portrait: top up
+    90: (p) => [g * Math.cos(p), g * Math.sin(p)], // landscape, top of the phone to the left
+    270: (p) => [-g * Math.cos(p), -g * Math.sin(p)], // landscape, top to the right
+  };
+  for (const [screen, read] of Object.entries(readings)) {
+    for (const sign of [1, -1]) { // iOS reports the opposite sign
+      const angle = (p) => { const [x, y] = read(p); return tiltAngle(sign * x, sign * y, Number(screen)); };
+      const neutral = angle(0);
+      assert.equal(tiltSteer(angle(0), neutral), 0, `${screen}: level`);
+      assert.ok(tiltSteer(angle(10 * deg), neutral) > 0.2, `${screen}: clockwise turns right`);
+      assert.ok(tiltSteer(angle(-10 * deg), neutral) < -0.2, `${screen}: anticlockwise turns left`);
+      assert.equal(tiltSteer(angle(40 * deg), neutral), 1, `${screen}: full lock`);
+      assert.equal(tiltSteer(angle(1 * deg), neutral), 0, `${screen}: a shaky hand does nothing`);
+    }
+  }
+});
+
+test('boost button: a tap fires it until the meter is empty, a hold boosts while held', () => {
+  const b = new BoostLatch();
+  b.down(0); b.up(100);
+  assert.ok(b.on, 'tap latches');
+  b.update(500, true);
+  assert.ok(b.on, 'stays on while boosting');
+  b.update(900, false);
+  assert.ok(!b.on, 'lets go once the meter runs dry');
+  b.down(1000); b.up(1100); b.down(1500); b.up(1600);
+  assert.ok(!b.on, 'second tap stops it');
+  b.down(2000);
+  assert.ok(b.on, 'held');
+  b.up(3000);
+  assert.ok(!b.on, 'released after a hold');
+});
+
+test('graphics AUTO: desktops start high, phones by GPU class', () => {
+  assert.equal(autoQuality('ANGLE (NVIDIA Quadro P2000)', false), 'high');
+  assert.equal(autoQuality('Adreno (TM) 740', true), 'medium');
+  assert.equal(autoQuality('Adreno (TM) 830', true), 'medium');
+  assert.equal(autoQuality('Adreno (TM) 650', true), 'low');
+  assert.equal(autoQuality('Mali-G715-Immortalis MC11', true), 'medium');
+  assert.equal(autoQuality('Mali-G78 MP14', true), 'low');
+  assert.equal(autoQuality('Apple GPU', true), 'medium');
+  assert.equal(autoQuality('', true), 'low');
+});

@@ -4,3 +4,9 @@ dist/
 *.exe
 .claude/
 desktop.ini
+# Android release signing key: keep it (phones need it to update the app), never commit it
+android/signing/
+android/local.properties
+android/.gradle/
+android/build/
+android/app/build/

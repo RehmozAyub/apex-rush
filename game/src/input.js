@@ -1,4 +1,6 @@
-// Keyboard + gamepad input. Drive controls are polled; menu actions are pushed as events.
+// Keyboard, gamepad and touch input. Drive controls are polled; menu actions are pushed as events.
+// lastDevice follows whatever was used last: a touch shows the on-screen controls (body.touch),
+// a key or pad button hides them again.
 
 // Split-screen key sets. In single player every key works for the one player.
 export const PLAYER_KEYS = [
@@ -35,6 +37,9 @@ export class Input {
     this.listeners = [];
     this.padPrev = {};
     this.lastDevice = 'keyboard';
+    this.touch = null; // TouchControls, on touch screens
+    if (navigator.maxTouchPoints > 0 && matchMedia('(pointer: coarse)').matches) this.setDevice('touch');
+    window.addEventListener('pointerdown', (e) => { if (e.pointerType === 'touch') this.setDevice('touch'); }, true);
     window.addEventListener('keydown', (e) => {
       if (e.repeat) {
         if (MENU_KEYS[e.code] && ['up', 'down', 'left', 'right'].includes(MENU_KEYS[e.code])) this.emit(MENU_KEYS[e.code], e.code);
@@ -42,7 +47,7 @@ export class Input {
         return;
       }
       this.keys.add(e.code);
-      this.lastDevice = 'keyboard';
+      this.setDevice('keyboard');
       if (MENU_KEYS[e.code]) this.emit(MENU_KEYS[e.code], e.code);
       if (ALL_KEYS.camera.includes(e.code)) this.emit('camera', e.code);
       if (ALL_KEYS.reset.includes(e.code)) this.emit('reset', e.code);
@@ -53,6 +58,12 @@ export class Input {
     });
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));
     window.addEventListener('blur', () => this.keys.clear());
+  }
+
+  setDevice(d) {
+    if (d === this.lastDevice) return;
+    this.lastDevice = d;
+    document.body.classList.toggle('touch', d === 'touch');
   }
 
   on(fn) {
@@ -92,7 +103,7 @@ export class Input {
     };
     for (const [k, v] of Object.entries(state)) {
       if (v && !this.padPrev[i][k]) {
-        this.lastDevice = 'pad';
+        this.setDevice('pad');
         this.emit(k, `pad${i}`);
       }
     }
@@ -103,6 +114,7 @@ export class Input {
   // (first pad = P1, second = P2); in single player everything controls the one car.
   drive(i = 0, split = false) {
     if (this.override) return { steer: 0, throttle: 0, brake: 0, handbrake: false, boost: false, ...(Array.isArray(this.override) ? this.override[i] : this.override) };
+    if (this.touch && i === 0 && !split && this.lastDevice === 'touch') return this.touch.drive();
     const set = split ? PLAYER_KEYS[i] : ALL_KEYS;
     let steer = (this.down('right', set) ? 1 : 0) - (this.down('left', set) ? 1 : 0);
     let throttle = this.down('throttle', set) ? 1 : 0;
