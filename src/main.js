@@ -16,6 +16,7 @@ import { CARS, PAINTS, QUALITY, QUALITY_ORDER, loadSettings, saveSettings } from
 import { formatTime } from './race.js';
 import { recordRace, discoverSignature, unlockedPaints, unlockText, STARS } from './progress.js';
 import { SIGNATURE_KINDS } from './signatures.js';
+import { OnlineFlow } from './onlineMenu.js';
 
 // setTimeout (not rAF) so loading also progresses when the window is hidden
 const IS_DESKTOP = /Electron/i.test(navigator.userAgent);
@@ -37,6 +38,7 @@ class Game {
 
   async init() {
     this.ui = new UI(document.getElementById('ui'));
+    this.onlineFlow = new OnlineFlow(this);
     const canvas = document.getElementById('gl');
     try {
       this.renderer = new Renderer(canvas, QUALITY[this.settings.quality] || QUALITY.high);
@@ -190,7 +192,7 @@ class Game {
   }
 
   titleItems() {
-    const items = [{ label: 'RACE' }, { label: '2 PLAYERS' }, { label: 'HOW TO PLAY' }, { label: 'SETTINGS' }];
+    const items = [{ label: 'RACE' }, { label: '2 PLAYERS' }, { label: 'ONLINE' }, { label: 'HOW TO PLAY' }, { label: 'SETTINGS' }];
     if (IS_DESKTOP) items.push({ label: 'QUIT' });
     return items;
   }
@@ -298,6 +300,7 @@ class Game {
   }
 
   pauseItems() {
+    if (this.session && this.session.online) return this.onlineFlow.pauseItems(); // the race goes on
     const onOff = (v) => (v ? 'ON' : 'OFF');
     const items = [{ key: 'resume', label: 'RESUME' }];
     if (this.players > 1) {
@@ -309,12 +312,16 @@ class Game {
   }
   renderPause() { this.ui.menu('m-pause', this.pauseItems(), this.menuIndex.pause); }
 
-  resultsItems() { return [{ label: 'RACE AGAIN' }, { label: 'NEXT TRACK' }, { label: 'MAIN MENU' }]; }
+  resultsItems() {
+    if (this.session && this.session.online) return this.onlineFlow.resultsItems();
+    return [{ label: 'RACE AGAIN' }, { label: 'NEXT TRACK' }, { label: 'MAIN MENU' }];
+  }
   renderResults() { this.ui.menu('m-results', this.resultsItems(), this.menuIndex.results); }
 
   // --- race ---------------------------------------------------------------------
   // reroll: pick the track again (a RANDOM pick rolls a new one); false = same track again
-  async startRace(reroll = true) {
+  // online: { net: { role, seed }, players: [host pick, guest pick], random } (see onlineMenu.js)
+  async startRace(reroll = true, online = null) {
     if (reroll) this.raceTrack = this.randomPick() ? this.rollTrack() : this.sel.track;
     this.ui.fade(true);
     await new Promise((r) => setTimeout(r, 350));
@@ -323,10 +330,12 @@ class Game {
     this.endSession();
     this.removeShowroom();
     this.carPick = 0;
+    if (online) this.players = 1;
     this.setViews(this.players);
-    const players = [{ carIndex: this.sel.car, paintIndex: this.sel.paint }];
+    let players = [{ carIndex: this.sel.car, paintIndex: this.sel.paint }];
     if (this.players > 1) players.push({ carIndex: this.sel2.car, paintIndex: this.sel2.paint });
-    this.session = new RaceSession(this, this.world, { players });
+    if (online) players = online.players;
+    this.session = new RaceSession(this, this.world, { players, net: online ? online.net : null });
     this.ui.clearPopups();
     this.state = 'race';
     this.ui.show('hud');
@@ -334,7 +343,7 @@ class Game {
     this.audio.playMusic(MAPS[this.raceTrack].id);
     this.slowTime = 0; this.autoDrops = 0;
     this.session.update(0.001);
-    if (this.randomPick()) this.session.popupAll(MAPS[this.raceTrack].name, 'RANDOM TRACK', 'hot');
+    if (online ? online.random : this.randomPick()) this.session.popupAll(MAPS[this.raceTrack].name, 'RANDOM TRACK', 'hot');
     this.renderer.renderer.compile(this.world.scene, this.renderer.camera);
     this.ui.fade(false);
   }
@@ -360,6 +369,9 @@ class Game {
   }
 
   showResults(list) {
+    const online = this.session.online;
+    if (online && this.onlineFlow.role === 'host') this.onlineFlow.sendResults(list);
+    if (online && this.onlineFlow.lastResults) list = this.onlineFlow.lastResults; // the host's are official
     const me = list.find((r) => r.isPlayer);
     const key = MAPS[this.raceTrack].id;
     const e = this.session.race.byId.get('player');
@@ -370,7 +382,10 @@ class Game {
       record = ' &nbsp;<small style="color:var(--yellow)">NEW LAP RECORD</small>';
     }
     let head, tds;
-    if (this.players > 1) {
+    if (online) {
+      head = this.onlineFlow.headline(list);
+      tds = `${this.session.takedowns} TAKEDOWNS`;
+    } else if (this.players > 1) {
       const [a, b] = ['P1', 'P2'].map((n) => list.find((r) => r.name === n));
       head = a.pos < b.pos ? '<b>PLAYER 1</b> WINS' : '<b>PLAYER 2</b> WINS';
       tds = `P1 ${a.takedowns} · P2 ${b.takedowns} TAKEDOWNS`;
@@ -391,7 +406,7 @@ class Game {
     this.ui.results(list, `${head} <small style="font-size:3vh;opacity:.8">&nbsp; ${tds}</small>${record}`, extras);
     this.resultsFinished = this.session.race.finishOrder.length;
     this.state = 'results';
-    this.menuIndex.results = 1; // NEXT TRACK is the default
+    this.menuIndex.results = online && this.onlineFlow.role !== 'host' ? 0 : 1; // NEXT TRACK is the default (an online guest waits for the host)
     this.ui.show('results');
     this.renderResults();
   }
@@ -400,6 +415,7 @@ class Game {
   onAction(a, code) {
     if (a === 'fullscreen') { this.toggleFullscreen(); return; }
     const st = this.state;
+    if (this.onlineFlow.handles(st)) { this.onlineFlow.onAction(a, code); return; }
     const move = (key, n, d) => { this.menuIndex[key] = (this.menuIndex[key] + d + n) % n; this.audio.blip(600, 0.03, 0.06); };
     if (st === 'title') {
       if (a === 'up' || a === 'down') { move('title', this.titleItems().length, a === 'up' ? -1 : 1); this.renderTitle(); }
@@ -429,7 +445,7 @@ class Game {
         this.refreshCar();
       }
       if (a === 'confirm' && code !== 'Space') this.confirmCar();
-      if (a === 'back') { if (this.carPick === 1) this.showCars(0); else this.showTracks(); }
+      if (a === 'back') { if (this.onlineFlow.active) this.onlineFlow.carChosen(); else if (this.carPick === 1) this.showCars(0); else this.showTracks(); }
     } else if (st === 'howto') {
       if (a === 'confirm' || a === 'back') this.showTitle();
     } else if (st === 'settings') {
@@ -455,7 +471,7 @@ class Game {
       if (a === 'confirm' && code !== 'Space') this.pauseSelect(this.menuIndex.pause);
       if (a === 'back' || a === 'pause') this.pauseSelect(0);
     } else if (st === 'results') {
-      if (a === 'left' || a === 'right' || a === 'up' || a === 'down') { move('results', 3, a === 'left' || a === 'up' ? -1 : 1); this.renderResults(); }
+      if (a === 'left' || a === 'right' || a === 'up' || a === 'down') { move('results', this.resultsItems().length, a === 'left' || a === 'up' ? -1 : 1); this.renderResults(); }
       if (a === 'confirm' && code !== 'Space') this.resultsSelect(this.menuIndex.results);
     }
   }
@@ -464,13 +480,15 @@ class Game {
     this.audio.blip(900, 0.06, 0.1);
     if (i === 0) { this.players = 1; this.showTracks(); }
     else if (i === 1) { this.players = 2; this.showTracks(); }
-    else if (i === 2) this.showHowTo();
-    else if (i === 3) this.showSettings('title');
+    else if (i === 2) this.onlineFlow.open();
+    else if (i === 3) this.showHowTo();
+    else if (i === 4) this.showSettings('title');
     else window.close();
   }
 
   confirmCar() {
     this.audio.blip(1000, 0.08, 0.12);
+    if (this.onlineFlow.active) { this.onlineFlow.carChosen(); return; }
     if (this.players > 1 && this.carPick === 0) this.showCars(1);
     else this.startRace();
   }
@@ -485,10 +503,12 @@ class Game {
       this.renderPause();
     } else if (key === 'restart') this.startRace(false);
     else if (key === 'settings') this.showSettings('pause');
+    else if (this.session && this.session.online) this.onlineFlow.leave();
     else this.quitToMenu();
   }
 
   resultsSelect(i) {
+    if (this.session && this.session.online) { this.onlineFlow.resultsSelect(i); return; }
     if (i === 0) this.startRace(false);
     else if (i === 1) {
       // NEXT TRACK: the next card, or another random track when RANDOM was picked
@@ -577,18 +597,25 @@ class Game {
       if (this.players > 1) this.world.updateView(1, realDt, this.time, this.renderer.cameras[1]);
       this.watchPerformance(realDt);
     } else if (this.session && (this.state === 'pause' || (this.state === 'settings' && this.settingsFrom === 'pause'))) {
-      // frozen
+      // frozen (online the race can't stop: the car brakes while the menu is open)
+      if (this.session.online) this.session.update(realDt);
     } else if (this.session && this.state === 'results') {
       this.session.update(realDt);
       // rivals still crossing the line: fill in their times
       const n = this.session.race.finishOrder.length;
-      if (n !== this.resultsFinished) { this.resultsFinished = n; this.ui.resultRows(this.session.results()); }
+      if (n !== this.resultsFinished) {
+        this.resultsFinished = n;
+        const list = this.session.results();
+        if (this.session.online && this.onlineFlow.role === 'host') this.onlineFlow.sendResults(list);
+        if (!(this.session.online && this.onlineFlow.lastResults)) this.ui.resultRows(list);
+      }
     } else if (this.world && this.showroomCar) {
       this.rig.updateOrbit(realDt, this.showroomCar, this.time);
       this.world.update(realDt, this.time, this.showroomCar, cam);
       const fx = this.renderer.fx;
       fx.blur = 0; fx.lines = 0; fx.ca = 0; fx.boost = 0; fx.flash = 0; fx.slowmo = 0;
     }
+    this.onlineFlow.frame();
     for (const fx of this.renderer.fxs) fx.weather = this.world ? this.world.flash : 0;
     if (this.session) this.session.fx.setScale(this.renderer.height / (2 * Math.tan((cam.fov * Math.PI) / 360)));
     this.renderer.render(this.time);
