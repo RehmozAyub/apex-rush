@@ -190,6 +190,12 @@ export class RaceSession {
 
   setAssist(i, on) { if (this.humans[i]) this.humans[i].assistOn = on; }
 
+  // camera shake for a player; on a phone it vibrates too
+  shake(H, amount) {
+    H.rig.addShake(amount);
+    this.game.haptic(H, amount);
+  }
+
   popup(title, sub = '', kind = '', H = this.humans[0]) { this.game.ui.popup(title, sub, kind, H ? H.index : 0); }
   popupAll(title, sub = '', kind = '') { for (const H of this.humans) this.popup(title, sub, kind, H); }
 
@@ -231,15 +237,16 @@ export class RaceSession {
     if (this.state === 'countdown') {
       this.countdown -= realDt;
       const n = Math.ceil(this.countdown - 0.6);
-      if (n < this.lastCount && n >= 1) { this.lastCount = n; game.ui.countdown(String(n)); game.audio.blip(520, 0.12, 0.25); }
+      if (n < this.lastCount && n >= 1) { this.lastCount = n; game.ui.countdown(String(n)); game.audio.blip(520, 0.12, 0.25); for (const H of this.humans) game.haptic(H, 0.12); }
       if (this.countdown <= 0.6 && this.lastCount > 0) {
         this.lastCount = 0;
         game.ui.countdown('GO!');
         game.audio.blip(1040, 0.35, 0.3);
+        for (const H of this.humans) game.haptic(H, 0.45);
         this.state = 'racing';
         this.race.start(this.time);
         for (const H of this.humans) {
-          if (H.input.throttle > 0.5) { H.boost.add(15); this.popup('PERFECT START', '+BOOST', 'good', H); }
+          if ((H.input.rev ?? H.input.throttle) > 0.5) { H.boost.add(15); this.popup('PERFECT START', '+BOOST', 'good', H); }
         }
       }
     }
@@ -263,7 +270,7 @@ export class RaceSession {
         boostHeld: this.state === 'racing' && !H.finished && H.input.boost && !pv.wrecked,
       });
       for (const e of events) if (e.type === 'drift') this.scoreEvent(H, 'DRIFT', e.gained);
-      if (H.boost.boosting && !H.wasBoosting) { game.audio.whoosh(true, 0.35); H.rig.addShake(0.3); }
+      if (H.boost.boosting && !H.wasBoosting) { game.audio.whoosh(true, 0.35); this.shake(H, 0.3); }
       H.wasBoosting = H.boost.boosting;
     }
 
@@ -342,7 +349,7 @@ export class RaceSession {
     const vol = c.human ? 1 : this.audibility(v);
     if (vol > 0.05) this.game.audio.impact(0.6 * vol);
     if (c.human) {
-      c.human.rig.addShake(0.5);
+      this.shake(c.human, 0.5);
       this.popup('SMASHED THROUGH', 'SECRET SHORTCUT', 'good', c.human);
     }
   }
@@ -352,7 +359,7 @@ export class RaceSession {
     const H = c.human, v = c.vehicle;
     for (const e of v.events) {
       if (e.type !== 'land') continue;
-      if (e.impact > 6) { this.fx.tyreSmoke(v.x, v.y, v.z, v.vx, v.vz, 1.2); if (H) H.rig.addShake(Math.min(0.6, e.impact / 25)); }
+      if (e.impact > 6) { this.fx.tyreSmoke(v.x, v.y, v.z, v.vx, v.vz, 1.2); if (H) this.shake(H, Math.min(0.6, e.impact / 25)); }
       if (!H || e.airTime < 0.35) continue;
       const air = Math.round(e.airTime * 10) / 10;
       if (e.trick && e.clean) {
@@ -401,8 +408,9 @@ export class RaceSession {
         this.takePickup(it);
         const old = c.power;
         c.power = it.power;
-        this.popup(POWERS[c.power].name, old && old !== c.power ? `REPLACED ${POWERS[old].name}` : `PRESS ${this.powerKey(H)} TO UNLEASH`, 'power', H);
+        this.popup(POWERS[c.power].name, old && old !== c.power ? `REPLACED ${POWERS[old].name}` : this.powerKey(H) === 'TAP' ? 'TAP POWER TO UNLEASH' : `PRESS ${this.powerKey(H)} TO UNLEASH`, 'power', H);
         game.audio.pickup(true);
+        game.haptic(H, 0.2);
       } else if (!c.power) {
         // an AI grabs a block only some of the time (one roll per block it drives through)
         if (!c.blockRoll || c.blockRoll.id !== it.id || this.time - c.blockRoll.t > 3) c.blockRoll = { id: it.id, t: this.time, take: Math.random() < AI_POWER.pickChance };
@@ -494,6 +502,7 @@ export class RaceSession {
 
   powerKey(H) {
     if (this.game.input.lastDevice === 'pad') return 'LB';
+    if (this.game.input.lastDevice === 'touch' && !this.split) return 'TAP';
     return this.split && H.index === 1 ? 'ENTER' : 'E';
   }
 
@@ -511,7 +520,7 @@ export class RaceSession {
       this.fx.sparks(pv.x, pv.y + 0.6, pv.z, pv.vx, pv.vz, 50, 2);
       if (this.net) this.net.powerFx({ kind: 'shockwave', x: pv.x, y: pv.y, z: pv.z });
       if (vol > 0.02) game.audio.shockwave(vol);
-      if (H) { H.rig.addShake(0.9); H.flash = Math.max(H.flash, 0.3); }
+      if (H) { this.shake(H, 0.9); H.flash = Math.max(H.flash, 0.3); }
       let hits = 0;
       for (const c of others) {
         if (c.vehicle.wrecked || c.vehicle.ghost > 0) continue;
@@ -525,7 +534,7 @@ export class RaceSession {
         this.popup(hits > 1 ? `SHOCKWAVE ×${hits}` : 'SHOCKWAVE', `${hits} TAKEDOWN${hits > 1 ? 'S' : ''}`, 'takedown', H);
         this.slowMo(this.split ? 0.8 : 1.4);
         H.flash = 0.5;
-        H.rig.addShake(1);
+        this.shake(H, 1);
       }
     } else if (kind === 'ricochet') {
       me.power = null;
@@ -539,7 +548,7 @@ export class RaceSession {
       });
       if (this.net) this.net.shotFired(shot);
       if (vol > 0.02) game.audio.fire(vol);
-      if (H) { this.popup('RICOCHET', 'FIRED!', 'power', H); H.rig.addShake(0.25); }
+      if (H) { this.popup('RICOCHET', 'FIRED!', 'power', H); this.shake(H, 0.25); }
     } else if (kind === 'oil') {
       me.power = null;
       const R = PICKUP_RULES;
@@ -820,7 +829,7 @@ export class RaceSession {
     if (this.state !== 'racing') return;
     if (closing > 3 && this.impactCooldown <= 0) {
       this.game.audio.impact(Math.min(1.2, closing / 15));
-      for (const c of [ca, cb]) if (c.human) c.human.rig.addShake(Math.min(0.8, closing / 20));
+      for (const c of [ca, cb]) if (c.human) this.shake(c.human, Math.min(0.8, closing / 20));
       this.impactCooldown = 0.15;
     }
     ca.lastContact = cb.lastContact = this.time;
@@ -865,7 +874,7 @@ export class RaceSession {
         this.crashHuman(H, 'WRECKED', hit.nx, hit.nz);
       } else if (hit.vn > 4 && this.impactCooldown <= 0) {
         this.game.audio.impact(Math.min(1, hit.vn / 18));
-        H.rig.addShake(Math.min(0.6, hit.vn / 25));
+        this.shake(H, Math.min(0.6, hit.vn / 25));
         H.flash = Math.max(H.flash, Math.min(0.12, hit.vn / 150));
         this.impactCooldown = 0.15;
       }
@@ -935,7 +944,7 @@ export class RaceSession {
     this.popup(title, `${c.name}${tag}${gained >= 1 ? `  +${Math.round(gained)} BOOST` : ''}${m > 1 ? `  ×${m}` : ''}`, 'takedown', by);
     if (quiet) return;
     by.flash = 0.5;
-    by.rig.addShake(1);
+    this.shake(by, 1);
     if (this.online) return; // online: no slow motion, and the camera stays on the road
     this.slowmo = this.split ? 0.8 : 1.4;
     by.rig.startCrashCam(v, this.split ? 1.0 : 1.4, Math.random() < 0.5 ? 1 : -1);
@@ -961,6 +970,7 @@ export class RaceSession {
     if (grudge) H.rival = byCar; // now your rival
     this.fx.explosion(v.x, v.y + 0.6, v.z, v.vx, v.vz, car.paint, v.y);
     this.game.audio.crash();
+    this.game.haptic(H, 1.5);
     this.popup(label, byCar ? `by ${byCar.name}${grudge ? ' · NEW RIVAL' : ''}` : 'CRASH', 'bad', H);
     this.slowMo(this.split ? 0.8 : 1.8);
     H.flash = 0.35;
@@ -1100,7 +1110,7 @@ export class RaceSession {
 
       game.audio.updateEngine({
         speed: pv.wrecked ? 0 : pv.speed, top: pv.spec.topSpeed,
-        throttle: this.state === 'countdown' ? H.input.throttle : pv.wrecked ? 0 : H.car.controls.throttle,
+        throttle: this.state === 'countdown' ? (H.input.rev ?? H.input.throttle) : pv.wrecked ? 0 : H.car.controls.throttle,
         boost: H.boostVis, slip: pv.air ? 0 : pv.drifting ? Math.min(1, Math.abs(pv.slip) * 2) : Math.max(0, Math.abs(pv.slip) - 0.15) * 2,
         scraping: pv.scraping > 0.5 && pv.speed > 5 ? Math.min(1, pv.speed / 40) : 0,
         active: !pv.wrecked, slowmo: slowmoFx, volume: this.split ? 0.7 : 1, style: pv.spec.style,

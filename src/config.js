@@ -55,12 +55,39 @@ export const BASE_PAINTS = PAINTS.filter((p) => !p.unlock).length; // AI rivals 
 
 export const AI_NAMES = ['VORTEX', 'KAZE', 'NOVA', 'RAZOR', 'HAVOC', 'STRYKER', 'ONYX', 'BLITZ', 'VIXEN', 'DIESEL'];
 
-export const QUALITY = {
+// Device: phones and tablets get touch controls, phone graphics presets and no split screen.
+const UA = typeof navigator !== 'undefined' ? navigator.userAgent || '' : '';
+export const IS_APP = /ApexRushAndroid/.test(UA); // the Android app (android/)
+export const IS_MOBILE = IS_APP || /Android|iPhone|iPad|iPod|Mobile/i.test(UA)
+  || (/Macintosh/.test(UA) && typeof navigator !== 'undefined' && navigator.maxTouchPoints > 1); // iPadOS
+
+const DESKTOP_QUALITY = {
   low: { label: 'LOW', pixelRatio: 0.75, shadow: 1024, bloom: true, blurSamples: 6, density: 0.45, shadows: true },
   medium: { label: 'MEDIUM', pixelRatio: 1.0, shadow: 2048, bloom: true, blurSamples: 8, density: 0.75, shadows: true },
   high: { label: 'HIGH', pixelRatio: 1.5, shadow: 2048, bloom: true, blurSamples: 12, density: 1.0, shadows: true },
 };
+// phones run out of fill rate first: render resolution and post-fx samples come down before scenery
+const MOBILE_QUALITY = {
+  low: { label: 'LOW', pixelRatio: 0.9, shadow: 1024, bloom: false, blurSamples: 4, density: 0.4, shadows: false },
+  medium: { label: 'MEDIUM', pixelRatio: 1.25, shadow: 1024, bloom: true, blurSamples: 6, density: 0.6, shadows: true },
+  high: { label: 'HIGH', pixelRatio: 1.75, shadow: 2048, bloom: true, blurSamples: 8, density: 0.85, shadows: true },
+};
+export const QUALITY = IS_MOBILE ? MOBILE_QUALITY : DESKTOP_QUALITY;
 export const QUALITY_ORDER = ['low', 'medium', 'high'];
+export const QUALITY_CHOICES = ['auto', ...QUALITY_ORDER]; // the GRAPHICS setting
+
+// GRAPHICS AUTO: the starting level for this device, from the GPU name. The game then steps it
+// down when the frame rate stays low and back up after a smooth race.
+export function autoQuality(gpu = '', mobile = IS_MOBILE) {
+  if (!mobile) return 'high';
+  const g = gpu.toLowerCase();
+  const num = (re) => { const m = g.match(re); return m ? Number(m[1]) : 0; };
+  if (num(/adreno[^0-9]*(\d{3})/) >= 730 || num(/mali-g(\d{3})/) >= 715 || /immortalis|xclipse|apple/.test(g)) return 'medium';
+  return 'low';
+}
+
+export const STEERING = ['slider', 'buttons', 'tilt']; // touch steering modes
+export const STEERING_LABEL = { slider: 'THUMB SLIDER', buttons: '◀ ▶ BUTTONS', tilt: 'TILT' };
 
 export const LAPS = 3;
 export const AI_COUNT = 7;
@@ -68,7 +95,7 @@ export const BOOST_SPEED = 1.32;
 export const BOOST_ACCEL = 1.7;
 
 export function loadSettings() {
-  const def = { quality: 'high', motionBlur: true, master: 0.8, music: 0.55, assist: true, assist2: true, bestLaps: {}, progress: { stars: {}, signatures: {}, totalTakedowns: 0 } };
+  const def = { quality: 'auto', autoQ: null, steering: 'slider', vibration: true, motionBlur: true, master: 0.8, music: 0.55, assist: true, assist2: true, bestLaps: {}, progress: { stars: {}, signatures: {}, totalTakedowns: 0 } };
   try {
     const s = JSON.parse(localStorage.getItem('apexrush.settings') || '{}');
     const p = s.progress || {};

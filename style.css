@@ -313,6 +313,219 @@ body.menu-cursor #ui .screen.show { pointer-events: auto; }
 .r-extra { position: absolute; left: 6vw; top: 13.5vh; display: flex; gap: 1.2vh; flex-wrap: wrap; }
 .r-extra span { font-size: 1.8vh; letter-spacing: 0.15em; padding: 0.5vh 1.4vh; background: rgba(255,212,0,0.15); border: 0.2vh solid var(--yellow); color: var(--yellow); transform: skewX(-12deg); }
 
+/* =====================================================================================
+   PHONES & TABLETS. body.touch = the last input was a touch (input.js). The UI is sized in vh,
+   which is small on a landscape phone, so small text is scaled up here; --u is a vh capped
+   for tablets. --sl/--sr/--st/--sb keep things clear of a camera cutout (the Android app sets
+   them; browsers use env()).
+   ===================================================================================== */
+:root {
+  --sl: env(safe-area-inset-left, 0px); --sr: env(safe-area-inset-right, 0px);
+  --st: env(safe-area-inset-top, 0px); --sb: env(safe-area-inset-bottom, 0px);
+  --u: min(1vh, 5.2px);
+}
+html, body { touch-action: none; -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none; overscroll-behavior: none; }
+#ui { left: var(--sl); right: var(--sr); }
+
+.tnav, .touchonly, #tc, #rotate { display: none; }
+body.touch .tnav { display: flex; }
+body.touch .touchonly { display: block; }
+.t-in { display: none; }
+body.touch .t-in { display: inline; }
+body.touch .k-in { display: none; }
+body.touch .keysonly, body.touch .hints, body.touch #s-title .press, body.touch .controls { display: none; }
+
+/* BACK / NEXT / RACE corner buttons */
+.tnav { position: absolute; top: calc(4vh + var(--st)); right: 4vw; gap: 2.4vh; z-index: 5; }
+.tnav b { font-size: 4.2vh; padding: 2.6vh 3.6vh; font-style: italic; font-variation-settings: 'wdth' 75, 'wght' 700; letter-spacing: 0.06em; background: rgba(8, 9, 14, 0.78);
+  border: 0.3vh solid rgba(255,255,255,0.35); transform: skewX(-14deg); cursor: pointer; transition: transform 0.1s, filter 0.1s; }
+.tnav b.go { background: var(--grad); border-color: transparent; box-shadow: 0 0 3vh rgba(255, 45, 85, 0.45); }
+.tnav b:active { filter: brightness(1.3); transform: skewX(-14deg) scale(0.95); }
+
+/* menus: bigger tap targets and readable text */
+body.touch .menu .item { font-size: 4vh; padding: 1.9vh 3vh 1.9vh 2.4vh; }
+body.touch .loadtext { font-size: 2.6vh; }
+body.touch #s-title .logo { top: 7vh; }
+body.touch #s-title .logo.big .l1 { font-size: 10vh; }
+body.touch #s-title .logo.big .l2 { font-size: 15vh; }
+body.touch #s-title .tagline { top: 34vh; font-size: 3vh; }
+body.touch #s-title .menu { top: 42vh; }
+body.touch #s-settings .menu { display: grid; grid-template-columns: 1fr 1fr; gap: 2vh 4vw; left: 6vw; right: 6vw; top: 20vh; }
+body.touch .menu.wide .item { min-width: 0; gap: 2vh; }
+body.touch .menu .item > span { white-space: nowrap; }
+body.touch #m-settings .item em::before { content: '\25C0\00a0\00a0'; opacity: 0.55; }
+body.touch #m-settings .item em::after { content: '\00a0\00a0\25B6'; opacity: 0.55; }
+body.touch .card .num { font-size: 2.4vh; }
+body.touch .card .tag { font-size: 2.6vh; }
+body.touch .card .meta span { font-size: 2.2vh; }
+body.touch .card .prog { font-size: 2.2vh; }
+body.touch .card .prog .stars i { font-size: 3vh; }
+body.touch .carpanel { top: 20vh; width: 60vh; }
+body.touch .carnav .arrow { font-size: 6vh; padding: 0.5vh 2vh; background: rgba(8, 9, 14, 0.6); transform: skewX(-14deg); cursor: pointer; }
+body.touch .carcount { font-size: 2.4vh; }
+body.touch .cardesc { font-size: 2.8vh; margin: 1vh 0 3vh; }
+body.touch .stat { font-size: 2.6vh; margin-bottom: 1.4vh; }
+body.touch .stat span { width: 18vh; }
+body.touch .paintlabel { font-size: 2.6vh; margin-top: 3vh; }
+body.touch .swatches { max-width: 76vh; gap: 1.6vh; }
+body.touch .swatches i { width: 7vh; height: 7vh; }
+body.touch .howto { top: 17vh; bottom: 3vh; overflow-y: auto; touch-action: pan-y; padding-right: 2vw; }
+body.touch .howto h2 { font-size: 3.4vh; }
+body.touch .howto p { font-size: 3vh; }
+body.touch .howto .picon { width: 4vh; height: 4vh; }
+body.touch .rrow { padding: 0.8vh 3vh; margin-bottom: 0.6vh; }
+body.touch .rrow.hdr { font-size: 2.2vh; }
+body.touch #s-results .menu { bottom: 3vh; }
+body.touch .r-extra span { font-size: 2.4vh; }
+
+/* HUD: the thumbs own the bottom corners, so the speedo and minimap move up out of the way */
+body.touch .hud .lbl { font-size: 2.4vh; }
+body.touch .h-times .row.dim, body.touch .h-times .row.td { font-size: 2.9vh; }
+body.touch .pop .s { font-size: 3vh; }
+body.touch .h-power, body.touch .h-boost > .lbl { display: none; }
+body.touch .h-speedo { top: 21vh; bottom: auto; right: 3vw; width: 21vh; height: 21vh; }
+body.touch .spd span { font-size: 6.5vh; }
+body.touch .spd small { font-size: 2vh; }
+body.touch .gear { display: none; }
+body.touch .h-assist { top: 22vh; bottom: auto; right: calc(3vw + 22vh); font-size: 2vh; }
+body.touch .minimap { top: 25vh; bottom: auto; left: 3vw; width: 21vh; height: 21vh; }
+body.touch .h-boost { width: 46vh; bottom: 4vh; }
+
+/* ---------- on-screen controls ----------
+   One shape per job: BOOST is the nitro canister (the loud one), DRIFT a skewed slab with a car
+   kicking sideways, BRAKE a stop-sign octagon, POWER the pickup block's slot, the slider knob a
+   steering wheel. Only transforms and opacity animate, so it stays cheap on phones. */
+body.touch #tc.on { display: block; position: absolute; inset: 0; pointer-events: auto; touch-action: none; z-index: 2; }
+:where(#tc) svg { display: block; width: 100%; height: 100%; fill: none; stroke: currentColor; stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; overflow: visible; }
+.tc-btn { position: absolute; display: flex; align-items: center; justify-content: center; color: #fff; cursor: pointer; user-select: none;
+  font-style: italic; font-variation-settings: 'wdth' 75, 'wght' 700; letter-spacing: 0.1em; font-size: calc(var(--u) * 2.4); line-height: 1;
+  text-shadow: 0 0 calc(var(--u) * 1) rgba(0,0,0,0.8); transition: transform 0.07s, filter 0.07s; }
+.tc-btn span { display: block; }
+
+/* BOOST: glass canister, fuel ring round the outside, chevrons that stream when it fires */
+.tc-boost { width: calc(var(--u) * 26); height: calc(var(--u) * 26); right: 3vw; bottom: calc(7vh + var(--sb)); border-radius: 50%; color: var(--cyan); --fill: 0; }
+.tc-boost::before { content: ''; position: absolute; inset: calc(var(--u) * -1.3); border-radius: 50%;
+  background: conic-gradient(from 200deg, #ff6a00 0, #ffd400 calc(var(--fill) * 360deg), rgba(255,255,255,0.12) calc(var(--fill) * 360deg));
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - var(--u) * 1.2), #000 calc(100% - var(--u) * 1.1));
+  mask: radial-gradient(farthest-side, transparent calc(100% - var(--u) * 1.2), #000 calc(100% - var(--u) * 1.1)); }
+.tc-boost .core { position: absolute; inset: 0; border-radius: 50%; border: calc(var(--u) * 0.45) solid rgba(25, 227, 255, 0.55);
+  background: radial-gradient(circle at 50% 38%, rgba(25, 227, 255, 0.28), rgba(6, 24, 40, 0.62) 62%, rgba(4, 10, 20, 0.7)); }
+.tc-boost .core::after { content: ''; position: absolute; inset: 0; border-radius: 50%; opacity: 0;
+  background: radial-gradient(circle at 50% 45%, #fff 0, #8ff4ff 22%, rgba(25, 227, 255, 0.85) 48%, rgba(25, 227, 255, 0) 72%); transition: opacity 0.1s; }
+.tc-boost .ico { position: relative; display: flex; flex-direction: column; align-items: center; gap: calc(var(--u) * 0.8); font-style: italic; }
+.tc-boost .ico svg { width: calc(var(--u) * 8); height: calc(var(--u) * 8); stroke-width: 3; }
+.tc-boost .ico span { font-size: calc(var(--u) * 3.1); color: #fff; letter-spacing: 0.14em; }
+.tc-boost .shock { position: absolute; inset: 0; border-radius: 50%; border: calc(var(--u) * 0.6) solid var(--cyan); opacity: 0; pointer-events: none; }
+.tc-boost.ready .core { animation: breathe 1.6s ease-in-out infinite; }
+@keyframes breathe { 50% { border-color: rgba(140, 245, 255, 0.95); } }
+.tc-boost.down { transform: scale(0.93); }
+.tc-boost.lit { color: #fff; }
+.tc-boost.lit .core { border-color: #fff; }
+.tc-boost.lit .core::after { opacity: 1; }
+.tc-boost.lit .ico span { color: #003a48; text-shadow: none; }
+.tc-boost.lit .ico svg { color: #003a48; }
+.tc-boost.lit .ico path { animation: stream 0.42s linear infinite; }
+.tc-boost.lit .ico path:nth-child(2) { animation-delay: -0.14s; }
+.tc-boost.lit .ico path:nth-child(1) { animation-delay: -0.28s; }
+@keyframes stream { 0% { opacity: 0.25; } 50% { opacity: 1; } 100% { opacity: 0.25; } }
+.tc-boost.lit .shock { animation: shock 0.6s ease-out infinite; }
+@keyframes shock { from { opacity: 0.8; transform: scale(1); } to { opacity: 0; transform: scale(1.45); } }
+
+/* DRIFT: a slab leaning into the slide, hot edge, a car kicking out over its own skid marks */
+.tc-drift { width: calc(var(--u) * 22); height: calc(var(--u) * 17); right: calc(3vw + var(--u) * 29); bottom: calc(5vh + var(--sb)); transform: skewX(-14deg);
+  border-radius: calc(var(--u) * 1.4); border: calc(var(--u) * 0.45) solid var(--hot); background: linear-gradient(160deg, rgba(40, 6, 16, 0.62), rgba(12, 6, 10, 0.7)); }
+.tc-drift::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: calc(var(--u) * 1.1); background: var(--grad); border-radius: 0 0 calc(var(--u) * 0.8) calc(var(--u) * 0.8); }
+.tc-drift > i { display: flex; flex-direction: column; align-items: center; gap: calc(var(--u) * 0.6); transform: skewX(14deg); font-style: italic; }
+.tc-drift svg { width: calc(var(--u) * 9); height: calc(var(--u) * 7.8); transition: transform 0.12s; }
+.tc-drift .car { fill: #fff; stroke: none; }
+.tc-drift .skid { stroke: var(--hot); stroke-width: 2.2; stroke-dasharray: 3 2.4; }
+.tc-drift span { font-size: calc(var(--u) * 2.8); }
+.tc-drift.down { transform: skewX(-14deg) scale(0.93); background: var(--grad); border-color: #fff; }
+.tc-drift.down svg { transform: rotate(-16deg) translateX(calc(var(--u) * 0.8)); }
+.tc-drift.down .skid { stroke: #fff; }
+.tc-drift.sliding .skid { animation: skid 0.35s linear infinite; }
+@keyframes skid { to { stroke-dashoffset: -10.8; } }
+
+/* BRAKE: small stop-sign octagon, dark until you press it, then it glows like brake lights */
+.tc-brake { width: calc(var(--u) * 15); height: calc(var(--u) * 15); right: calc(3vw + var(--u) * 31.5); bottom: calc(5vh + var(--u) * 21 + var(--sb));
+  clip-path: polygon(29% 0, 71% 0, 100% 29%, 100% 71%, 71% 100%, 29% 100%, 0 71%, 0 29%); background: rgba(255, 59, 48, 0.7); }
+.tc-brake::before { content: ''; position: absolute; inset: calc(var(--u) * 0.5); clip-path: inherit; background: rgba(18, 8, 8, 0.72); transition: background 0.07s; }
+.tc-brake span { position: relative; font-size: calc(var(--u) * 2.5); }
+.tc-brake.down { transform: scale(0.92); background: #fff; }
+.tc-brake.down::before { background: radial-gradient(circle, #ff6a5e, #e0101e 70%); }
+
+/* POWER: the pickup block's slot. Empty = dashed and hollow; loaded = solid, in the power's colour */
+.tc-power { width: calc(var(--u) * 17); height: calc(var(--u) * 17); right: calc(3vw + var(--u) * 4.5); bottom: calc(7vh + var(--u) * 29 + var(--sb)); color: rgba(255,255,255,0.5); }
+.tc-power .slot { position: absolute; inset: 15%; transform: rotate(45deg); border-radius: calc(var(--u) * 1.6); border: calc(var(--u) * 0.4) dashed currentColor; background: rgba(10, 12, 20, 0.35); }
+.tc-power em { position: relative; font-style: normal; font-size: calc(var(--u) * 4.4); opacity: 0.55; }
+.tc-power img { position: relative; width: 58%; height: 58%; display: none; filter: drop-shadow(0 0 calc(var(--u) * 1) rgba(0,0,0,0.6)); }
+.tc-power.has { color: var(--pc); }
+.tc-power.has .slot { border-style: solid; background: radial-gradient(circle, rgba(255,255,255,0.22), rgba(10, 12, 20, 0.6)); animation: turnslot 6s linear infinite; }
+.tc-power.has .slot::after { content: ''; position: absolute; inset: calc(var(--u) * -1.4); border-radius: calc(var(--u) * 2.4); border: calc(var(--u) * 0.3) solid currentColor; opacity: 0.35; }
+.tc-power.has img { display: block; }
+.tc-power.has em { display: none; }
+@keyframes turnslot { to { transform: rotate(405deg); } }
+.tc-power.fresh::after { content: 'TAP'; position: absolute; top: calc(var(--u) * -3.6); padding: calc(var(--u) * 0.6) calc(var(--u) * 1.4); background: var(--pc); color: #000; border-radius: calc(var(--u) * 0.6);
+  font-size: calc(var(--u) * 2.1); letter-spacing: 0.12em; text-shadow: none; animation: blink 0.5s steps(2) infinite; }
+.tc-power.down { transform: scale(0.88); }
+.tc-power { --pc: #ffd400; }
+.tc-power.p-shockwave { --pc: #2ee86a; }
+.tc-power.p-ricochet { --pc: #ff8a00; }
+.tc-power.p-oil { --pc: #b04dff; }
+.tc-power.p-strike { --pc: #ffd400; }
+
+/* pit board: reset, pause, camera on one slanted strip */
+.tc-top { position: absolute; left: 50%; top: calc(1.4vh + var(--st)); display: flex; transform: translateX(-50%) skewX(-14deg);
+  background: rgba(8, 9, 14, 0.62); border: calc(var(--u) * 0.3) solid rgba(255,255,255,0.22); border-radius: calc(var(--u) * 1); }
+.tc-top .tc-btn { position: relative; width: calc(var(--u) * 11); height: calc(var(--u) * 9); color: rgba(255,255,255,0.88); }
+.tc-top .tc-btn + .tc-btn { border-left: calc(var(--u) * 0.25) solid rgba(255,255,255,0.16); }
+.tc-top svg { width: calc(var(--u) * 4.6); height: calc(var(--u) * 4.6); transform: skewX(14deg); stroke-width: 2.4; }
+.tc-top [data-b="pause"] svg { fill: currentColor; stroke: none; }
+.tc-top .tc-btn.down { background: var(--grad); color: #fff; }
+
+/* thumb slider: a strip of road with a steering wheel riding on it (it turns as you steer) */
+.tc-stick { position: absolute; left: 0; top: 0; width: 0; height: 0; opacity: 0; transition: opacity 0.12s; pointer-events: none; --r: 60px; }
+.tc-stick.show { opacity: 1; }
+.tc-stick .base { position: absolute; left: calc(var(--r) * -1 - var(--u) * 6); top: calc(var(--u) * -4); width: calc(var(--r) * 2 + var(--u) * 12); height: calc(var(--u) * 8);
+  border-radius: calc(var(--u) * 4); border: calc(var(--u) * 0.3) solid rgba(255,255,255,0.3);
+  background: repeating-linear-gradient(90deg, rgba(255, 212, 0, 0.75) 0 calc(var(--u) * 2.4), transparent 0 calc(var(--u) * 4.4)) center / calc(100% - var(--u) * 12) calc(var(--u) * 0.5) no-repeat,
+    rgba(14, 16, 24, 0.55); }
+.tc-stick .base::before, .tc-stick .base::after { position: absolute; top: 50%; transform: translateY(-50%); font-size: calc(var(--u) * 3); color: rgba(255,255,255,0.55); font-style: normal; }
+.tc-stick .base::before { content: '\2039\2039'; left: calc(var(--u) * 1.6); }
+.tc-stick .base::after { content: '\203A\203A'; right: calc(var(--u) * 1.6); }
+.tc-stick .knob { position: absolute; left: calc(var(--u) * -7); top: calc(var(--u) * -7); width: calc(var(--u) * 14); height: calc(var(--u) * 14); color: #fff; }
+#tc .rim { stroke: #fff; stroke-width: 5; fill: rgba(10, 12, 20, 0.45); }
+#tc .spoke { stroke: #fff; stroke-width: 4; }
+#tc .hub { fill: var(--hot); stroke: none; }
+#tc .mark { stroke: var(--hot); stroke-width: 5; stroke-linecap: butt; }
+.tc-hint { position: absolute; left: calc(5vw + var(--u) * 2); bottom: calc(12vh + var(--sb)); padding: calc(var(--u) * 1.6) calc(var(--u) * 3.4); font-size: calc(var(--u) * 2.6); letter-spacing: 0.25em;
+  font-style: italic; font-variation-settings: 'wdth' 75, 'wght' 700; background: rgba(10, 12, 20, 0.5); border: calc(var(--u) * 0.3) dashed rgba(255, 212, 0, 0.6); transform: skewX(-14deg);
+  color: rgba(255,255,255,0.9); transition: opacity 0.4s; pointer-events: none; }
+#tc.touched .tc-hint, #tc.m-buttons .tc-hint { opacity: 0; }
+
+/* ◀ ▶ buttons: tall slanted panels with road-sign chevrons */
+.tc-lr { display: none; }
+#tc.m-buttons .tc-lr { display: block; }
+.tc-lr .tc-btn { width: calc(var(--u) * 20); height: calc(var(--u) * 24); bottom: calc(5vh + var(--sb)); transform: skewX(-14deg); border-radius: calc(var(--u) * 1.4);
+  background: rgba(10, 12, 20, 0.5); border: calc(var(--u) * 0.4) solid rgba(255,255,255,0.4); }
+.tc-lr .tc-btn svg { width: calc(var(--u) * 9); height: calc(var(--u) * 9); transform: skewX(14deg); stroke-width: 3.2; }
+.tc-lr .tc-btn:first-child { left: 3vw; }
+.tc-lr .tc-btn:last-child { left: calc(3vw + var(--u) * 23); }
+.tc-lr .tc-btn.down { background: var(--grad); border-color: #fff; transform: skewX(-14deg) scale(0.94); }
+
+/* tilt: the same wheel, turning with the phone */
+.tc-tilt { display: none; position: absolute; left: calc(4vw + var(--u) * 2); bottom: calc(6vh + var(--sb)); align-items: center; gap: calc(var(--u) * 2); pointer-events: none; }
+#tc.m-tilt .tc-tilt { display: flex; }
+.tc-tilt .tw { display: block; width: calc(var(--u) * 13); height: calc(var(--u) * 13); }
+.tc-tilt span { font-size: calc(var(--u) * 2.4); letter-spacing: 0.3em; font-style: italic; font-variation-settings: 'wdth' 75, 'wght' 700; opacity: 0.7; }
+
+/* phone held upright */
+#rotate { position: fixed; inset: 0; z-index: 100; background: radial-gradient(ellipse at 50% 60%, #22101c, #000 70%); flex-direction: column; align-items: center; justify-content: center; gap: 5vw;
+  font-size: 4.6vw; letter-spacing: 0.4em; font-style: italic; font-variation-settings: 'wdth' 75, 'wght' 700; text-align: center; }
+#rotate .phone { width: 16vw; height: 28vw; border: 1vw solid #fff; border-radius: 3vw; animation: turn 1.8s ease-in-out infinite; }
+@keyframes turn { 0%, 25% { transform: rotate(0deg); } 60%, 100% { transform: rotate(-90deg); border-color: var(--hot); } }
+@media (orientation: portrait) and (max-width: 900px) { body.touch #rotate { display: flex; } }
+
 /* --- online: name, join, lobby --- */
 #s-online, #s-join, #s-lobby { background: rgba(0,0,0,0.72); }
 #s-online .menu, #s-join .menu { position: absolute; left: 6vw; top: 42vh; }
