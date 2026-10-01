@@ -3,6 +3,7 @@ package com.apexrush.game;
 import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.ApplicationInfo;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Build;
@@ -47,6 +48,8 @@ public class MainActivity extends Activity {
         }
         vibrator = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
 
+        // debug builds (build-apk.mjs --debug) can be inspected from chrome://inspect
+        if ((getApplicationInfo().flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0) WebView.setWebContentsDebuggingEnabled(true);
         web = new WebView(this);
         web.setBackgroundColor(Color.BLACK);
         setContentView(web);

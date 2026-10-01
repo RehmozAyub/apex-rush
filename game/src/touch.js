@@ -44,7 +44,7 @@ export class BoostLatch {
   reset() { this.latched = false; this.held = false; }
 }
 
-const RIGHT = ['brake', 'drift', 'boost', 'power']; // right-thumb buttons
+const RIGHT = ['brake', 'power', 'drift', 'boost']; // right-thumb buttons, smallest first
 const SLIDE = new Set(['brake', 'drift', 'boost']); // a thumb can slide between these
 
 export class TouchControls {
@@ -143,11 +143,18 @@ export class TouchControls {
         if (x >= r.left - 6 && x <= r.right + 6 && y >= r.top - 6 && y <= r.bottom + 10) return b;
       }
     }
+    const list = only || RIGHT;
+    // a thumb inside a button's box gets that button (small ones first, so the big DRIFT and
+    // BOOST can't steal BRAKE's edge); in the gaps, the nearest one within reach
+    for (const b of list) {
+      const r = rect(b);
+      if (r.width && x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return b;
+    }
     let best = null, bd = only ? 1.0 : 1.3;
-    for (const b of only || RIGHT) {
+    for (const b of list) {
       const r = rect(b);
       if (!r.width) continue;
-      const d = Math.hypot(x - (r.left + r.right) / 2, y - (r.top + r.bottom) / 2) / (r.width / 2);
+      const d = Math.hypot(x - (r.left + r.right) / 2, y - (r.top + r.bottom) / 2) / (Math.max(r.width, r.height) / 2);
       if (d < bd) { bd = d; best = b; }
     }
     return best;
