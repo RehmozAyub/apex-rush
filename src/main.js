@@ -67,7 +67,7 @@ class Game {
     }
     this.renderer.motionBlur = this.settings.motionBlur;
     this.input = new Input();
-    if (navigator.maxTouchPoints > 0) {
+    if (IS_MOBILE || navigator.maxTouchPoints > 0) {
       this.touch = new TouchControls(document.getElementById('ui'), (a) => this.input.emit(a, 'touch'));
       this.touch.setMode(this.settings.steering);
       this.input.touch = this.touch;
