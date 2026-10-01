@@ -467,3 +467,139 @@ test('stars, signatures and earned paints', () => {
   assert.ok(discoverSignature(p, 'coast', 'line'));
   assert.ok(!discoverSignature(p, 'coast', 'line'));
 });
+
+test('forks and merges: walls only where a barrier is drawn (no invisible walls)', () => {
+  let r = 7;
+  const rnd = () => ((r = (r * 16807) % 2147483647) / 2147483647);
+  let drives = 0, hits = 0;
+  for (const id of Object.keys(LAYOUTS)) {
+    const { t, list } = shortcutsOf(id);
+    const set = new ShortcutSet(t, list);
+    for (const sc of list) {
+      for (const atMerge of [false, true]) {
+        for (let k = 0; k < 120; k++) {
+          // drive at a random angle across the gap between the roads
+          const v = new Vehicle(CARS[k % CARS.length]);
+          if (k % 2) {
+            // start on the main road near the fork / merge, close to the shortcut's edge
+            const s = atMerge ? sc.b - 10 - rnd() * 60 : sc.a + rnd() * 60;
+            v.placeOnTrack(t, s, sc.side * (t.halfWidth - 1.5 - rnd() * 6), 0);
+          } else {
+            // or on the shortcut itself, near its ends, heading back toward the main road
+            const u = atMerge ? sc.path.length - sc.overlapOut - rnd() * 40 : sc.overlapIn * rnd() + 5;
+            const p = sc.path.pointAt(u, (rnd() - 0.5) * 2 * (sc.path.halfWidth - 1.2));
+            v.placeOnTrack(t, sc.mainS(u), 0, 0);
+            Object.assign(v, { x: p.x, z: p.z, heading: p.heading, onSC: true, sc, scIdx: -1 });
+          }
+          const ang = v.heading + (rnd() - 0.5) * 0.9;
+          const sp = 15 + rnd() * 35;
+          v.heading = ang; v.vx = Math.sin(ang) * sp; v.vz = Math.cos(ang) * sp;
+          drives++;
+          for (let i = 0; i < 120; i++) {
+            const steer = (rnd() - 0.5) * 2;
+            v.update(1 / 120, { steer, throttle: 1, brake: 0, handbrake: false, boost: false }, 1);
+            const h = constrainOnRoads(v, t, set, 1 / 120);
+            if (!h) continue;
+            hits++;
+            // the barrier the car touched must exist where it touched
+            if (v.onSC) {
+              const q = v.sc.path.project(v.x, v.z);
+              const side = Math.sign(q.lateral) < 0 ? 0 : 1;
+              assert.ok(!v.sc.pathGap[side][q.idx], `${id}: invisible shortcut wall at u=${q.s.toFixed(0)}`);
+            } else {
+              const p = t.project(v.x, v.z);
+              assert.ok(!set.isGap(p.s, Math.sign(p.lateral)), `${id}: invisible main-road wall at s=${p.s.toFixed(0)}`);
+            }
+          }
+        }
+      }
+    }
+  }
+  assert.ok(drives > 500 && hits > 0, `drives ${drives} hits ${hits}`);
+});
+
+// drive a car up to a ramp lip and through the jump with the given drift / steer inputs
+function jump(sc, inputs) {
+  const { t, list } = shortcutsOf('city');
+  const set = new ShortcutSet(t, list);
+  const r = sc.ramps[0];
+  const v = new Vehicle(CARS[0]);
+  const start = sc.path.pointAt(r.u0 - 30, r.half ? r.half * 2.5 : 0);
+  v.placeOnTrack(t, sc.mainS(r.u0 - 30), 0, 0);
+  Object.assign(v, { x: start.x, z: start.z, heading: start.heading, vx: Math.sin(start.heading) * 42, vz: Math.cos(start.heading) * 42, onSC: true, sc, scIdx: -1 });
+  for (let i = 0; i < 700; i++) {
+    const u = v.onSC ? v.scU : 0;
+    const c = inputs(u - (r.u0 + r.len), v.air);
+    v.update(1 / 120, { throttle: 1, brake: 0, boost: false, steer: 0, handbrake: false, ...c }, 1);
+    constrainOnRoads(v, t, set, 1 / 120);
+    const e = v.events && v.events.find((x) => x.type === 'land');
+    if (e) return e;
+  }
+  return null;
+}
+
+test('flat spin, aerial donut and barrel roll', () => {
+  const { list } = shortcutsOf('city');
+  const full = list.find((sc) => sc.ramps.length && !sc.ramps[0].half);
+  const half = list.find((sc) => sc.ramps.length && sc.ramps[0].half);
+  // drift into the lip, let go once airborne: one turn
+  const spin = jump(full, (d, air) => ({ handbrake: d > -6 && !air, steer: d > -6 && !air ? 1 : 0 }));
+  assert.equal(spin.trick, 'spin');
+  assert.ok(spin.clean);
+  // keep drift held through the jump: two turns
+  const donut = jump(full, (d) => ({ handbrake: d > -6, steer: d > -6 ? -1 : 0 }));
+  assert.equal(donut.trick, 'donut');
+  assert.ok(donut.clean);
+  // drift released a moment before the lip still counts
+  const late = jump(full, (d) => ({ handbrake: d > -12 && d < -4, steer: d > -12 && d < -4 ? 1 : 0 }));
+  assert.equal(late.trick, 'spin');
+  // drift + steer just after take-off also starts one
+  const air = jump(full, (d, inAir) => ({ handbrake: inAir && d < 6, steer: inAir && d < 6 ? 1 : 0 }));
+  assert.ok(air.trick === 'spin' || air.trick === 'donut', `late start: ${air.trick}`);
+  assert.ok(air.clean);
+  // no input: just airtime
+  assert.equal(jump(full, () => ({})).trick, null);
+  if (half) {
+    const roll = jump(half, (d, inAir) => ({ handbrake: d > -6 && !inAir, steer: d > -6 && !inAir ? 1 : 0 }));
+    assert.equal(roll.trick, 'roll');
+    assert.ok(roll.clean);
+  }
+});
+
+test('fast jumps (with and without tricks) never crash and never hit a wall in the air', () => {
+  for (const id of ['city', 'snow', 'jungle']) {
+    const { t, list } = shortcutsOf(id);
+    const set = new ShortcutSet(t, list);
+    let runs = 0, landings = 0;
+    for (const sc of list.filter((x) => x.ramps.length)) {
+      const r = sc.ramps[0];
+      for (let run = 0; run < 24; run++) {
+        runs++;
+        const v = new Vehicle(CARS[run % CARS.length]);
+        const p = sc.path.pointAt(r.u0 - 50, r.half ? r.half * 2 : 0);
+        v.placeOnTrack(t, sc.mainS(r.u0 - 50), 0, 0);
+        const sp = 40 + (run % 8) * 6;
+        Object.assign(v, { x: p.x, z: p.z, heading: p.heading, vx: Math.sin(p.heading) * sp, vz: Math.cos(p.heading) * sp, onSC: true, sc, scIdx: -1 });
+        constrainOnRoads(v, t, set, 1 / 120);
+        const mode = run % 3, st = run % 2 ? 0.8 : -0.8;
+        for (let k = 0; k < 400; k++) {
+          const d = (v.onSC ? v.scU : 999) - (r.u0 + r.len);
+          const hb = mode === 0 ? false : mode === 1 ? d > -8 && !v.air : d > -8 && d < 15;
+          const road = v.onSC ? v.sc.path : t;
+          const q = road.project(v.x, v.z);
+          const aim = road.pointAt(q.s + 12 + v.speed * 0.35, d < 0 && r.half ? r.half * 2.2 : 0);
+          let e = Math.atan2(aim.x - v.x, aim.z - v.z) - v.heading;
+          e = Math.atan2(Math.sin(e), Math.cos(e));
+          v.update(1 / 120, { throttle: 1, boost: true, brake: 0, steer: hb ? st : Math.max(-1, Math.min(1, -e * 2.4)), handbrake: hb }, 1.32);
+          const h = constrainOnRoads(v, t, set, 1 / 120);
+          assert.ok(!(h && v.air), `${id}: hit a wall in the air`);
+          const flying = v.air || v.landCool > 0;
+          assert.ok(!(h && !flying && isWallCrash({ speed: h.speed, angleDeg: h.angle }, RULES)), `${id}: crashed after a jump (run ${run})`);
+          if (v.events) for (const ev of v.events.splice(0)) if (ev.type === 'land') { landings++; if (ev.trick) assert.ok(ev.clean, `${id}: sloppy ${ev.trick}`); }
+          if (!v.onSC && d > 60) break;
+        }
+      }
+    }
+    assert.equal(landings, runs, `${id}: ${landings} landings from ${runs} jumps`);
+  }
+});

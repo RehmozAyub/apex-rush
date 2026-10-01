@@ -21,6 +21,8 @@ export const SHORTCUT = {
   separation: 120, // between two shortcuts along the main road (m)
   searchStep: 20,
   forkLength: 60, // the shortcut must leave the main road within this distance (m)
+  gapIn: 1.5, gapWiden: 3, // barrier left out where it lies this close to the other road (m)
+  free: 5, // ...and a car there can cross onto the other road up to this far beyond its edge
 };
 
 // Open polyline resampled at a uniform step, with TrackPath-like queries.
@@ -268,32 +270,41 @@ export class Shortcut {
       const i0 = Math.max(0, j - 1), i1 = Math.min(path.n - 1, j + 1);
       path.grade[j] = (path.y[i1] - path.y[i0]) / ((i1 - i0) * path.step || 1);
     }
-    // main-road barrier samples on the shortcut's side that lie inside the shortcut are gaps
+    // main-road barrier samples on the shortcut's side that lie on (or right by) the shortcut
+    // are left out. The physics (constrainOnRoads) lets cars cross exactly there.
+    const G = SHORTCUT;
     this.mainGap = new Uint8Array(track.n);
+    const near = new Float32Array(track.n).fill(Infinity); // barrier point -> shortcut edge (m)
     const q = {};
     for (let i = 0; i < track.n; i++) {
       const s = i * track.step;
       if (s < a - 30 || s > b + 30) continue;
       const bx = track.x[i] + track.rx[i] * side * (hw + 0.5), bz = track.z[i] + track.rz[i] * side * (hw + 0.5);
       path.project(bx, bz, -1, q);
-      if (Math.abs(q.lateral) < shw + 1.5 && q.beyond === 0) this.mainGap[i] = 1;
+      if (q.beyond === 0 && q.s > 3 && q.s < path.length - 3) near[i] = Math.abs(q.lateral) - shw;
+      if (near[i] < G.gapIn) this.mainGap[i] = 1;
     }
-    // widen each gap a touch so no post sticks out into the fork
+    // widen each gap a touch so no post sticks out into the fork (only next to the shortcut)
     const g = Uint8Array.from(this.mainGap);
-    for (let i = 0; i < track.n; i++) if (g[i]) for (let k = -3; k <= 3; k++) this.mainGap[(i + k + track.n) % track.n] = 1;
+    for (let i = 0; i < track.n; i++) {
+      if (!g[i]) continue;
+      for (let k = -3; k <= 3; k++) { const j = (i + k + track.n) % track.n; if (near[j] < G.gapWiden) this.mainGap[j] = 1; }
+    }
     // shortcut barrier samples that lie on the main road are left out
     this.pathGap = [new Uint8Array(path.n), new Uint8Array(path.n)]; // [left(-1), right(+1)]
+    const pNear = [new Float32Array(path.n).fill(Infinity), new Float32Array(path.n).fill(Infinity)];
     const p = {};
     for (let j = 0; j < path.n; j++) {
       for (const [k, sd] of [[0, -1], [1, 1]]) {
         const bx = path.x[j] + path.rx[j] * sd * (shw + 0.5), bz = path.z[j] + path.rz[j] * sd * (shw + 0.5);
         track.project(bx, bz, -1, p);
-        if (Math.abs(p.lateral) < hw + 1.5 && Math.abs(track.deltaS(p.s, (a + b) / 2)) < (b - a) / 2 + 40) this.pathGap[k][j] = 1;
+        if (Math.abs(track.deltaS(p.s, (a + b) / 2)) < (b - a) / 2 + 40) pNear[k][j] = Math.abs(p.lateral) - hw;
+        if (pNear[k][j] < G.gapIn) this.pathGap[k][j] = 1;
       }
     }
-    for (const arr of this.pathGap) {
-      const c = Uint8Array.from(arr);
-      for (let j = 0; j < path.n; j++) if (c[j]) for (let k = -2; k <= 2; k++) if (j + k >= 0 && j + k < path.n) arr[j + k] = 1;
+    for (const k of [0, 1]) {
+      const arr = this.pathGap[k], c = Uint8Array.from(arr);
+      for (let j = 0; j < path.n; j++) if (c[j]) for (let d = -2; d <= 2; d++) if (j + d >= 0 && j + d < path.n && pNear[k][j + d] < G.gapWiden) arr[j + d] = 1;
     }
     // the stretch at each end where the two roads overlap
     let first = 0, last = path.n - 1;
@@ -350,17 +361,38 @@ export class ShortcutSet {
   }
 }
 
-export const AIR = { gravity: 22, lipDrop: 0.3, minLaunch: 2, maxLaunch: 8, airTurn: 1.2 };
+export const AIR = {
+  gravity: 22, lipDrop: 0.3, minLaunch: 2, maxLaunch: 8,
+  airTurn: 2.2, // rad/s the flight turns toward the road below
+  aimAhead: 22, // ...aiming at the road's middle this far ahead (m)
+  lateTrick: 0.4, // a trick can still be started this long after take-off (s)
+  landCool: 0.7, // after landing, wall hits can't wreck the car for this long (s)
+  donutHold: 0.2, donutTime: 0.4, // drift still held after this long, with this much air left: 720
+};
+
+function timeToGround(v, ground) {
+  const above = Math.max(0, v.airY - ground);
+  return (v.vy + Math.sqrt(Math.max(0, v.vy * v.vy + 2 * AIR.gravity * above))) / AIR.gravity;
+}
+
+// Begin a flat spin / barrel roll that completes one turn exactly as the car lands.
+function startTrick(v, ground, steer) {
+  if (!v.air) v.airY = v.lastGround;
+  const T = timeToGround(v, ground);
+  // timed to finish a little before the predicted landing (the road can rise under the car)
+  v.trick = { kind: v.trickKind || 'spin', dir: Math.sign(steer) || 1, target: Math.PI * 2, rate: (Math.PI * 2) / Math.max(0.25, T * 0.82), angle: 0 };
+}
 
 // Ground height under the car (road + ramp) and the airborne state. A car leaving a ramp lip
-// flies; while airborne it keeps its momentum and lands back on the ground. With drift held
-// and steering at take-off it does a trick: a flat spin (full ramp) or a barrel roll (half
-// ramp), timed to finish on landing. Landings push { type: 'land', airTime, trick, clean }
-// to v.events.
+// flies; while airborne it keeps its momentum and lands back on the ground. Drifting into the
+// lip (or drift + steer in the first moments of the jump) does a trick: a flat spin (full ramp)
+// or a barrel roll (half ramp), timed to finish on landing. Landings push
+// { type: 'land', airTime, trick, clean } to v.events.
 // tangent: road direction under the car ({tx, tz}); airborne cars turn toward it (air control)
 function airStep(v, ground, dt, ramp, tangent = null) {
   if (v.wrecked) { v.air = false; v.lastGround = ground; v.roadY = ground; return; }
   v.roadY = ground;
+  if (v.landCool > 0) v.landCool -= dt;
   if (!v.air) {
     const last = v.lastGround ?? ground;
     const vyG = (ground - last) / Math.max(dt, 1e-4);
@@ -371,11 +403,11 @@ function airStep(v, ground, dt, ramp, tangent = null) {
       v.airY = last;
       v.airTime = 0;
       v.trick = null;
-      if (v.inHandbrake && Math.abs(v.inSteer) > 0.3) {
-        const drop = last - ground;
-        const T = (v.vy + Math.sqrt(v.vy * v.vy + 2 * AIR.gravity * drop)) / AIR.gravity;
-        v.trick = { kind: ramp && ramp.half ? 'roll' : 'spin', dir: Math.sign(v.inSteer), rate: (Math.PI * 2) / Math.max(0.35, T), angle: 0 };
-      }
+      v.yawRate = 0;
+      v.trickKind = ramp && ramp.half ? 'roll' : 'spin';
+      // drifting into the lip (or drift tapped just before it) starts the trick
+      const steering = v.inHandbrake && Math.abs(v.inSteer) > 0.3;
+      if (steering || v.drifting || v.hbRecent > 0) startTrick(v, ground, steering ? v.inSteer : v.driftDir || -Math.sign(v.slip) || 1);
     } else {
       v.vyGround = vyG;
       v.y = ground;
@@ -385,9 +417,12 @@ function airStep(v, ground, dt, ramp, tangent = null) {
     v.vy -= AIR.gravity * dt;
     v.airY += v.vy * dt;
     v.airTime += dt;
+    // a late trick: drift + steer early in the jump still has time to come round
+    if (!v.trick && v.airTime < AIR.lateTrick && v.inHandbrake && Math.abs(v.inSteer) > 0.3) startTrick(v, ground, v.inSteer);
     if (tangent) {
-      // arcade air control: the car (and its flight) eases round to follow the road below
-      const want = Math.atan2(tangent.tx, tangent.tz);
+      // arcade air control: the flight eases round to follow the road below, aiming back
+      // toward its middle so a car never flies into the barriers
+      const want = Math.atan2(tangent.tx, tangent.tz) + Math.atan2(tangent.lateral || 0, AIR.aimAhead); // heading + = turn left
       const back = Math.abs(wrapAngle(v.heading - want)) > Math.PI / 2;
       const target = back ? want + Math.PI : want;
       const d = Math.max(-AIR.airTurn * dt, Math.min(AIR.airTurn * dt, wrapAngle(target - v.heading)));
@@ -396,13 +431,26 @@ function airStep(v, ground, dt, ramp, tangent = null) {
       const vx = v.vx * c + v.vz * sn, vz = -v.vx * sn + v.vz * c;
       v.vx = vx; v.vz = vz;
     }
-    if (v.trick) v.trick.angle = Math.min(Math.PI * 2, v.trick.angle + v.trick.rate * dt);
+    const tr = v.trick;
+    if (tr) {
+      // keep drift held through the jump and a flat spin becomes a double: the aerial donut
+      if (tr.kind === 'spin' && tr.target < Math.PI * 3 && v.inHandbrake && v.airTime > AIR.donutHold) {
+        const left = timeToGround(v, ground);
+        if (left > AIR.donutTime) { tr.target = Math.PI * 4; tr.rate = (tr.target - tr.angle) / (left * 0.82); }
+      }
+      tr.angle = Math.min(tr.target, tr.angle + tr.rate * dt);
+    }
     if (v.airY <= ground) {
       v.air = false;
       v.vyGround = 0;
       const t = v.trick;
-      (v.events || (v.events = [])).push({ type: 'land', airTime: v.airTime, trick: t ? t.kind : null, clean: !t || t.angle > Math.PI * 1.6, impact: -v.vy });
+      (v.events || (v.events = [])).push({ type: 'land', airTime: v.airTime, trick: t ? (t.kind === 'spin' && t.target > Math.PI * 3 ? 'donut' : t.kind) : null, clean: !t || t.angle > t.target - Math.PI * 0.4, impact: -v.vy });
       v.trick = null;
+      v.landCool = AIR.landCool;
+      // land clean: any drift or spin from before the jump is gone, nose along the flight
+      v.drifting = false;
+      v.yawRate = 0;
+      v.heading = Math.atan2(v.vx, v.vz);
       v.y = ground;
     } else {
       v.y = v.airY;
@@ -421,20 +469,29 @@ function airStep(v, ground, dt, ramp, tangent = null) {
 // position along it. Returns the wall hit (if any) like Vehicle.constrain.
 export function constrainOnRoads(v, track, set, dt = 1 / 120, tmpP = {}, tmpQ = {}) {
   const list = set ? set.list : [];
+  const lim = track.halfWidth - 1.1;
   if (v.onSC && v.sc) {
-    const sc = v.sc, path = sc.path;
+    const sc = v.sc, path = sc.path, shLim = path.halfWidth - 1.1;
     const q = path.project(v.x, v.z, v.scIdx ?? -1, tmpQ);
-    const atEnd = q.beyond !== 0 || q.s < sc.overlapIn + 6 || q.s > path.length - sc.overlapOut - 6;
-    let leave = false;
-    if (atEnd && !v.air) {
-      const p = track.project(v.x, v.z, v.idx, tmpP);
-      leave = q.beyond !== 0 || Math.abs(p.lateral) <= track.halfWidth - 1.1;
+    let leave = q.beyond !== 0 && !v.air;
+    let free = 0;
+    if (!leave && !v.air) {
+      const side = Math.sign(q.lateral);
+      const openSide = Math.abs(q.lateral) > shLim && sc.pathGap[side < 0 ? 0 : 1][q.idx];
+      const nearMerge = q.s > path.length - sc.overlapOut - 6;
+      if (openSide || nearMerge) {
+        const p = track.project(v.x, v.z, v.idx, tmpP);
+        if (Math.abs(p.lateral) <= lim) leave = true; // back on the main road
+        // between the two roads: no barrier here, so no wall
+        else if (openSide && Math.abs(p.lateral) <= track.halfWidth + SHORTCUT.free) free = side;
+      }
     }
     if (!leave) {
       v.idx = v.scIdx ?? q.idx;
-      const hit = v.constrain(path);
+      const hit = v.constrain(path, free);
       v.scIdx = v.idx;
       v.scU = v.s;
+      v.scLat = v.lateral; // real position across the shortcut (v.lateral is parked off-road below)
       v.s = sc.mainS(v.scU);
       v.idx = Math.round(v.s / track.step) % track.n;
       airStep(v, v.y + sc.rampHeight(v.scU, v.lateral), dt, sc.rampAt(v.scU), tmpQ);
@@ -445,19 +502,27 @@ export function constrainOnRoads(v, track, set, dt = 1 / 120, tmpP = {}, tmpQ = 
     v.sc = null;
   }
   const p = track.project(v.x, v.z, v.idx, tmpP);
-  if (Math.abs(p.lateral) > track.halfWidth - 1.1) {
+  let free = 0;
+  if (Math.abs(p.lateral) > lim) {
+    const side = Math.sign(p.lateral);
     for (const sc of list) {
-      if (!sc.isGap(p.s, Math.sign(p.lateral))) continue;
+      if (!sc.isGap(p.s, side)) continue;
       const q = sc.path.project(v.x, v.z, -1, tmpQ);
-      if (q.beyond === 0 && Math.abs(q.lateral) <= sc.path.halfWidth - 1.1) {
+      if (q.beyond !== 0) continue;
+      if (Math.abs(q.lateral) <= sc.path.halfWidth - 1.1) {
         v.onSC = true;
         v.sc = sc;
         v.scIdx = q.idx;
         return constrainOnRoads(v, track, set, dt, tmpP, tmpQ);
       }
+      // the barrier is open here: drive across the gap toward the shortcut (only on the side of
+      // the shortcut that faces the main road, so nothing slips past its outer barrier)
+      const c = track.pointAt(p.s, 0);
+      const toMain = Math.sign(sc.path.project(c.x, c.z, q.idx).lateral);
+      if (Math.sign(q.lateral) === toMain && Math.abs(q.lateral) <= sc.path.halfWidth + SHORTCUT.free) free = side;
     }
   }
-  const hit = v.constrain(track);
+  const hit = v.constrain(track, free);
   airStep(v, v.y, dt, null);
   return hit;
 }

@@ -57,6 +57,8 @@ export class Vehicle {
     if (this.ghost > 0) this.ghost -= dt;
     this.inHandbrake = !!c.handbrake; // read at take-off (ramp tricks)
     this.inSteer = c.steer;
+    this.hbRecent = c.handbrake ? 0.5 : Math.max(0, (this.hbRecent || 0) - dt);
+    if (c.handbrake && Math.abs(c.steer) > 0.3) this.driftDir = Math.sign(c.steer); // last drift direction
     if (this.air) {
       // flying off a ramp: no grip, no steering, momentum carries the car
       this.boosting = !!c.boost;
@@ -146,7 +148,8 @@ export class Vehicle {
   }
 
   // Keep inside the barriers. Returns impact info when the car hits a wall this step.
-  constrain(track) {
+  // freeSide (-1 / +1): no barrier on that side here (a shortcut fork), so no wall either.
+  constrain(track, freeSide = 0) {
     const p = track.project(this.x, this.z, this.idx, this.proj);
     this.idx = p.idx; this.s = p.s; this.lateral = p.lateral; this.grade = p.grade;
     const th = Math.atan2(p.tx, p.tz);
@@ -163,6 +166,7 @@ export class Vehicle {
     this.touching = false;
     if (Math.abs(p.lateral) <= lim) return null;
     const side = Math.sign(p.lateral);
+    if (freeSide && side === freeSide) return null;
     const pen = Math.abs(p.lateral) - lim;
     const nx = -side * p.rx, nz = -side * p.rz; // inward normal
     this.x += nx * pen; this.z += nz * pen;

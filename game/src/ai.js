@@ -63,7 +63,7 @@ export class AIDriver {
     }
     // shortcut: decide on the approach, line up on its side, then follow it
     let route = track, rs = v.s, lane = null;
-    if (v.onSC && v.sc) { route = v.sc.path; rs = v.scU; lane = 0; }
+    if (v.onSC && v.sc) { route = v.sc.path; rs = v.scU ?? v.sc.path.project(v.x, v.z, -1, this.pq).s; lane = 0; }
     else {
       for (const sc of this.scs) {
         const d = track.deltaS(v.s, sc.a); // + = fork ahead
