@@ -72,6 +72,8 @@ export class UI {
           <div class="col">
             <h2>THE RACE</h2>
             <p>3 laps, 8 cars. Finish first and wreck rivals on the way.</p>
+            <h2>ONLINE</h2>
+            <p><b>ONLINE → HOST</b> shows a 4-letter <b>room code</b>: your friend picks <b>JOIN</b> and types it. You race each other plus 6 AI, each on your own device. Pick a name first; the host picks the track. A crash between the two of you goes to whoever hit first.</p>
             <h2>BOOST</h2>
             <p>Fill the meter by <b>drifting</b>, <b>near misses</b>, <b>slipstreaming</b> behind rivals, <b>takedowns</b> and <b>boost rings</b> on the road. Chain moves quickly for an adrenaline multiplier up to <b>×5</b>.</p>
             <h2>TAKEDOWNS</h2>

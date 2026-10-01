@@ -26,6 +26,7 @@ export class Online {
     this.clock = new NetClock(role === 'host');
     this.session = null;
     this.raceId = 0;
+    this.early = []; // race messages that arrived before this device finished loading that race
     link.onMessage = (m) => this.onMessage(m);
     link.onState = (b) => this.onStateBuf(b);
     link.onClose = () => { this.closed = true; if (this.handlers.onClosed) this.handlers.onClosed(); };
@@ -46,7 +47,11 @@ export class Online {
     if (!m || !m.type) return;
     if (m.type === 'ping') { this.send(this.clock.reply(m)); return; }
     if (m.type === 'pong') { this.clock.onPong(m); return; }
-    if (m.race !== undefined) { if (this.session && m.race === this.raceId) this.raceMessage(m); return; }
+    if (m.race !== undefined) {
+      if (this.session && m.race === this.raceId) this.raceMessage(m);
+      else if (m.race !== this.raceId) { this.early.push(m); if (this.early.length > 200) this.early.shift(); } // for a race still loading here
+      return;
+    }
     if (this.handlers.onMessage) this.handlers.onMessage(m);
   }
 
@@ -66,6 +71,10 @@ export class Online {
     this.startedAt = this.now;
     this.myCar = session.racers.find((c) => !c.remote);
     this.otherCar = session.racers.find((c) => c.remote) || null;
+    this.loadedSent = -99;
+    const early = this.early.filter((m) => m.race === raceId);
+    this.early = [];
+    for (const m of early) this.raceMessage(m);
   }
 
   detach() {
@@ -78,7 +87,7 @@ export class Online {
   // this device has built the race; the host starts the countdown once both have
   raceLoaded() {
     this.loaded[this.role] = true;
-    if (this.role === 'guest') this.rsend({ type: 'loaded' });
+    if (this.role === 'guest') { this.rsend({ type: 'loaded' }); this.loadedSent = this.now; }
     else this.tryGo();
   }
 
@@ -131,6 +140,8 @@ export class Online {
     const S = this.session;
     if (!S) return;
     const now = this.now;
+    // guest: keep saying 'loaded' until the countdown is set (the host may still have been loading)
+    if (this.role === 'guest' && this.goAt === null && this.loaded.guest && now - this.loadedSent > 1) { this.rsend({ type: 'loaded' }); this.loadedSent = now; }
     if (this.myCar) { const v = this.myCar.vehicle; this.hist[this.role].add(now, v.x, v.z, v.speed); }
     this.sendAcc += dt;
     if (this.sendAcc >= 1 / SEND_RATE - 0.002) {
@@ -221,7 +232,7 @@ export class Online {
     const S = this.session, car = (i) => (i >= 0 ? S.cars[i] : null);
     const sc = (i) => (i >= 0 && S.shortcuts ? S.shortcuts.list[i] : null);
     switch (m.type) {
-      case 'loaded': this.loaded.guest = true; this.tryGo(); break;
+      case 'loaded': this.loaded.guest = true; if (this.goAt !== null) this.rsend({ type: 'go', at: this.goAt }); else this.tryGo(); break;
       case 'go': this.goAt = m.at; break;
       case 'claim': if (this.judge) { const o = this.judge.add(m.claim, this.now, this.clock.rtt); if (o) this.resolveHit(o); } break;
       case 'push': { const c = car(m.car); if (c && !c.remote) { c.pushedAt = S.time; c.pushedBy = car(m.by); } break; }
@@ -298,7 +309,7 @@ export class Online {
       c.owner = this.role;
       if (c.isPlayer) {
         c.isPlayer = false;
-        c.name = 'FRIEND (AI)';
+        c.name = `${c.name} (AI)`;
         S.racers = S.racers.filter((r) => r !== c);
       }
       if (!c.ai) c.ai = new AIDriver(c.vehicle, S.track, { lane: c.vehicle.lateral, skill: 0.96, aggression: 0.4, shortcuts: S.shortcuts ? S.shortcuts.list : [] });
