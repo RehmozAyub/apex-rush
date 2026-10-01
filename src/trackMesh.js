@@ -71,7 +71,7 @@ export function buildTrackMeshes(track, style, maxAniso, asphalt, shortcuts = nu
     metalness: style.road.metalness ?? 0.0,
     envMapIntensity: style.road.envIntensity ?? 1,
   });
-  addWorldDetail(roadMat, { fine: [1.4, 0.14], macro: [0.011, 0.26], rough: 0.12 });
+  addWorldDetail(roadMat, { fine: [1.4, 0.14], macro: [0.011, 0.26], rough: 0.12, minRough: style.road.minRough ?? 0.02, sunSpec: style.road.sunSpec ?? 0.3 });
   const road = new THREE.Mesh(fixWinding(ribbon(track, [-hw, 0], [hw, 0], { vScale: 1 / 40 }), true), roadMat);
   road.receiveShadow = true;
   group.add(road);
@@ -115,7 +115,15 @@ export function buildTrackMeshes(track, style, maxAniso, asphalt, shortcuts = nu
   // Barriers
   addBarriers(group, track, style.barrier, hw + 0.5, sideKeep, true);
 
-  if (shortcuts) for (const sc of shortcuts.list) group.add(buildShortcut(sc, style));
+  // shortcuts; their entrance arrows pulse (world.update calls group.userData.update)
+  const pulses = [];
+  if (shortcuts) for (const sc of shortcuts.list) { const g = buildShortcut(sc, style); pulses.push(...g.userData.pulses); group.add(g); }
+  group.userData.update = (time) => {
+    for (const p of pulses) {
+      const o = (((time * 1.1 - p.k * 0.22) % 1) + 1) % 1; // a wave running toward the shortcut
+      p.mat.opacity = p.base * (0.28 + 0.72 * Math.exp(-o * 4.5));
+    }
+  };
 
   // Start / finish
   const p0 = track.pointAt(0, 0);
@@ -247,6 +255,8 @@ function buildShortcut(sc, style) {
     group.add(e);
   }
   addBarriers(group, path, style.barrier, shw + 0.5, keepFor, false);
+  group.userData.pulses = entranceGuides(group, sc, style);
+  edgeReflectors(group, sc);
 
   for (const r of sc.ramps) { group.add(rampMesh(path, r, shw)); group.add(rampGuides(path, r, shw, style)); }
   if (sc.fence) return group; // hidden shortcuts: no sign, a fence across the way in instead
@@ -392,4 +402,86 @@ function rampGuides(path, r, shw, style) {
     group.add(sign);
   }
   return group;
+}
+
+// Into a shortcut: glowing arrows hovering over the way in, plus chevrons on the road, all
+// pulsing in a wave that runs into the shortcut. Easy to spot on a dark map, quiet on a bright one.
+let arrowTex = null;
+function arrowTexture() {
+  if (arrowTex) return arrowTex;
+  const c = document.createElement('canvas');
+  c.width = 256; c.height = 192;
+  const g = c.getContext('2d');
+  const chev = (y0) => {
+    g.beginPath();
+    g.moveTo(128, y0); g.lineTo(220, y0 + 70); g.lineTo(178, y0 + 70); g.lineTo(128, y0 + 32); g.lineTo(78, y0 + 70); g.lineTo(36, y0 + 70); g.closePath();
+  };
+  // soft halo, then a bright core
+  g.shadowColor = 'rgba(255,255,255,0.9)';
+  g.shadowBlur = 22;
+  g.fillStyle = 'rgba(255,255,255,0.55)';
+  for (const y0 of [24, 92]) { chev(y0); g.fill(); }
+  g.shadowBlur = 0;
+  g.fillStyle = '#ffffff';
+  for (const y0 of [24, 92]) { chev(y0); g.fill(); }
+  arrowTex = new THREE.CanvasTexture(c);
+  arrowTex.colorSpace = THREE.SRGBColorSpace;
+  return arrowTex;
+}
+
+function entranceGuides(group, sc, style) {
+  const path = sc.path, track = sc.track;
+  const pulses = [];
+  const col = new THREE.Color(style.shortcut?.guide ?? 0xffd23f);
+  const q = {};
+  const surfaceY = (p) => {
+    // where the two roads overlap use whichever surface is on top
+    track.project(p.x, p.z, -1, q);
+    return Math.abs(q.lateral) < track.halfWidth ? Math.max(p.y, track.pointAt(q.s, q.lateral).y) : p.y;
+  };
+  // chevrons on the road
+  const floorGeo = new THREE.PlaneGeometry(5.2, 5.2).rotateX(-Math.PI / 2);
+  [-30, -20, -10].map((d) => sc.overlapIn + d).filter((u) => u > 3).forEach((u, k) => {
+    const p = path.pointAt(u, 0);
+    const mat = new THREE.MeshBasicMaterial({ map: chevronTexture(), color: col, transparent: true, opacity: 0.8, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 });
+    const m = new THREE.Mesh(floorGeo, mat);
+    m.position.set(p.x, surfaceY(p) + 0.05, p.z);
+    m.rotation.y = p.heading + Math.PI; // texture "up" points along the shortcut
+    m.renderOrder = 2;
+    group.add(m);
+    pulses.push({ mat, k, base: 0.8 });
+  });
+  // glowing chevrons hovering over the fork (high enough to drive under), facing the cars coming
+  // up the main road and pointing into the shortcut
+  const face = track.pointAt(sc.a, 0).heading + Math.PI;
+  const boardGeo = new THREE.PlaneGeometry(2.6, 2.1).rotateZ(-sc.side * Math.PI / 2);
+  for (let k = 0; k < 3; k++) {
+    const u = sc.overlapIn * (0.45 + k * 0.22);
+    const p = path.pointAt(u, 0);
+    const mat = new THREE.MeshBasicMaterial({ map: arrowTexture(), color: col, transparent: true, opacity: 0.8, depthWrite: false, side: THREE.DoubleSide, toneMapped: false });
+    const m = new THREE.Mesh(boardGeo, mat);
+    m.position.set(p.x, surfaceY(p) + 3.1, p.z);
+    m.rotation.y = face;
+    m.renderOrder = 3;
+    group.add(m);
+    pulses.push({ mat, k: k + 2, base: 0.8 });
+  }
+  return pulses;
+}
+
+// Small amber reflector studs along both edges of a shortcut so its line shows up at night.
+function edgeReflectors(group, sc) {
+  const path = sc.path, shw = path.halfWidth;
+  const studs = [];
+  for (let u = sc.overlapIn + 4; u < path.length - sc.overlapOut - 4; u += 9) {
+    for (const sd of [-1, 1]) {
+      const p = path.pointAt(u, sd * (shw - 0.35));
+      studs.push(p);
+    }
+  }
+  if (!studs.length) return;
+  const mesh = new THREE.InstancedMesh(new THREE.BoxGeometry(0.32, 0.1, 0.32), new THREE.MeshBasicMaterial({ color: new THREE.Color(0xffa820).multiplyScalar(1.3) }), studs.length);
+  const m = new THREE.Matrix4();
+  studs.forEach((p, i) => { m.makeRotationY(p.heading); m.setPosition(p.x, p.y + 0.03, p.z); mesh.setMatrixAt(i, m); });
+  group.add(mesh);
 }

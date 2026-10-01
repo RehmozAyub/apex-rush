@@ -31,11 +31,11 @@ export default {
   layout: LAYOUTS.snow,
   exposure: 1.0,
   envIntensity: 0.9,
-  bloom: { strength: 0.45, radius: 0.6, threshold: 0.95 },
+  bloom: { strength: 0.24, radius: 0.45, threshold: 1.15 },
   fog: { color: 0xaeb8c8, density: 0.0021 },
   sky: {
     top: 0x4a566c, horizon: 0xaab4c4, bottom: 0xc8d0da,
-    sunDir: new THREE.Vector3(-0.5, 0.18, -0.6), sunColor: 0xffc890, sunSize: 0.006, sunIntensity: 1.2, glow: 0.35,
+    sunDir: new THREE.Vector3(-0.5, 0.18, -0.6), sunColor: 0xffc890, sunSize: 0.0018, sunIntensity: 2.5, glow: 0.2,
     clouds: 1.0, cloudColor: 0xb8c0cc, horizonSharp: 0.5,
   },
   sun: { color: 0xffd8b0, intensity: 1.3 },
@@ -43,12 +43,12 @@ export default {
   smoke: [0.96, 0.97, 1.0],
   weather: { type: 'snow', count: 6000, wind: [2.5, 0.8], color: 0xffffff, spray: [0.97, 0.98, 1.0] },
   trackStyle: {
-    road: { base: '#3e4148', line: '#dfe3ea', edge: '#dfe3ea', lanes: 2, roughness: 0.6, snowEdges: true, wet: true, envIntensity: 1.0, cracks: 1.2, seed: 55 }, // slushy
+    road: { base: '#3e4148', line: '#dfe3ea', edge: '#dfe3ea', lanes: 2, roughness: 0.6, snowEdges: true, wet: true, envIntensity: 1.0, minRough: 0.3, sunSpec: 0.12, cracks: 1.2, seed: 55 }, // slushy
     kerb: null,
     barrier: { type: 'guardrail', color: 0xb8bec8, glow: [0xff3a1a, 0xff3a1a], glowIntensity: 1.6 },
     embankment: 0xe6ebf2,
     shoulder: 0xd8dee8,
-    shortcut: { color: 0xd6dce6 },
+    shortcut: { color: 0x9aa3b0 },
     accent: '#7ac8ff',
   },
 
@@ -115,8 +115,8 @@ export default {
     const poleGeo = merge([colored(new THREE.CylinderGeometry(0.05, 0.05, 1.8, 5), 0xff5a10), colored(new THREE.CylinderGeometry(0.052, 0.052, 0.3, 5).translate(0, 0.55, 0), 0x111111)]);
     scene.add(instanced(poleGeo, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6 }), poles, { cast: false }));
     scene.add(instanced(new THREE.CylinderGeometry(0.15, 0.22, 9, 8), new THREE.MeshStandardMaterial({ color: 0x3a3c42, metalness: 0.7, roughness: 0.5 }), lamps));
-    scene.add(instanced(new THREE.BoxGeometry(4.8, 0.25, 0.6), new THREE.MeshBasicMaterial({ color: new THREE.Color(0xffa850).multiplyScalar(6) }), heads, { cast: false }));
-    const pool = instanced(new THREE.PlaneGeometry(16, 22).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ map: radialTexture('rgba(255,170,90,0.5)', 'rgba(255,150,80,0)'), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }), pools, { cast: false });
+    scene.add(instanced(new THREE.BoxGeometry(4.8, 0.25, 0.6), new THREE.MeshBasicMaterial({ color: new THREE.Color(0xffa850).multiplyScalar(3.5) }), heads, { cast: false }));
+    const pool = instanced(new THREE.PlaneGeometry(9, 20).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ map: radialTexture('rgba(255,170,90,0.32)', 'rgba(255,150,80,0)'), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }), pools, { cast: false });
     pool.renderOrder = 1;
     scene.add(pool);
 

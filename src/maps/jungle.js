@@ -51,7 +51,7 @@ export default {
   layout: LAYOUTS.jungle,
   exposure: 1.1,
   envIntensity: 0.8,
-  bloom: { strength: 0.45, radius: 0.6, threshold: 0.9 },
+  bloom: { strength: 0.3, radius: 0.5, threshold: 1.05 },
   fog: { color: 0x3c4640, density: 0.0024 },
   sky: {
     top: 0x161c20, horizon: 0x46524c, bottom: 0x283028,
@@ -64,7 +64,7 @@ export default {
   headlights: true,
   weather: { type: 'rain', count: 3200, wind: [3, 1], color: 0xa8b8c8, lightning: true, spray: [0.72, 0.76, 0.8] },
   trackStyle: {
-    road: { base: '#2a2c2e', line: '#e0e0d8', edge: '#e0e0d8', lanes: 2, roughness: 0.45, wet: true, envIntensity: 1.2, cracks: 1.5, patches: 2, seed: 77 }, // rain-soaked
+    road: { base: '#2a2c2e', line: '#e0e0d8', edge: '#e0e0d8', lanes: 2, roughness: 0.45, wet: true, envIntensity: 1.0, minRough: 0.22, cracks: 1.5, patches: 2, seed: 77 }, // rain-soaked
     kerb: ['#e0c020', '#1a1a1a'],
     barrier: { type: 'wall', color: 0x5a5c52, height: 0.9, glow: [0xffd23f, 0xffd23f], glowIntensity: 1.2 },
     embankment: 0x3a4a2a,

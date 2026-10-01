@@ -44,9 +44,11 @@ export function grainTexture() {
 }
 
 // fine: [scale (1/m), strength]   macro: [scale, strength]   rough: roughness variation
-export function addWorldDetail(mat, { fine = [0.6, 0.3], macro = [0.02, 0.25], rough = 0.15, triplanar = false } = {}) {
+// minRough: roughness floor; sunSpec: scales highlights from direct lights (both keep a low sun
+// from turning a glossy road into a blinding glare)
+export function addWorldDetail(mat, { fine = [0.6, 0.3], macro = [0.02, 0.25], rough = 0.15, triplanar = false, minRough = 0.02, sunSpec = 1 } = {}) {
   const tex = grainTexture();
-  const key = `detail-${fine}-${macro}-${rough}-${triplanar}`;
+  const key = `detail-${fine}-${macro}-${rough}-${triplanar}-${minRough}-${sunSpec}`;
   mat.customProgramCacheKey = () => key;
   mat.onBeforeCompile = (sh) => {
     sh.uniforms.uGrain = { value: tex };
@@ -84,7 +86,9 @@ export function addWorldDetail(mat, { fine = [0.6, 0.3], macro = [0.02, 0.25], r
         float dMacro = texture2D(uGrain, vDetailPos.xz * uMacro.x + 0.37).r - 0.5;
         diffuseColor.rgb *= (1.0 + dFine * uFine.y) * (1.0 + dMacro * uMacro.y);`)
       .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
-        roughnessFactor = clamp(roughnessFactor * (1.0 + dFine * uRoughVar), 0.02, 1.0);`);
+        roughnessFactor = clamp(roughnessFactor * (1.0 + dFine * uRoughVar), ${minRough.toFixed(3)}, 1.0);`)
+      .replace('#include <lights_fragment_end>', `#include <lights_fragment_end>
+        reflectedLight.directSpecular *= ${sunSpec.toFixed(3)};`);
   };
   mat.needsUpdate = true;
   return mat;

@@ -31,9 +31,9 @@ export default {
   name: 'NEON CITY',
   tagline: 'Midnight streets. Wet asphalt. Neon everywhere.',
   layout: LAYOUTS.city,
-  exposure: 1.1,
+  exposure: 0.98,
   envIntensity: 1.0,
-  bloom: { strength: 0.7, radius: 0.6, threshold: 0.9 },
+  bloom: { strength: 0.38, radius: 0.45, threshold: 1.05 },
   fog: { color: 0x150c26, density: 0.0016 },
   sky: {
     top: 0x03040c, horizon: 0x3a1548, bottom: 0x0a0812,
@@ -46,12 +46,12 @@ export default {
   underglow: true,
   headlights: true,
   trackStyle: {
-    road: { base: '#222228', line: '#d8d8e0', edge: '#e0c040', lanes: 3, roughness: 0.55, metalness: 0.05, wet: true, envIntensity: 1.15, wear: 1.3, oil: 6, patches: 3, seed: 33 }, // wet, worn city streets
+    road: { base: '#222228', line: '#d8d8e0', edge: '#e0c040', lanes: 3, roughness: 0.55, metalness: 0.05, wet: true, envIntensity: 0.8, minRough: 0.2, wear: 1.3, oil: 6, patches: 3, seed: 33 }, // wet, worn city streets
     kerb: null,
     barrier: { type: 'wall', color: 0x5a5c66, height: 1.05, glow: [0xff2d95, 0x19e3ff], glowIntensity: 3 },
     embankment: null,
     shoulder: 0x2a2a30,
-    shortcut: { color: 0x3b3b40 },
+    shortcut: { color: 0x5e5e6c },
     accent: '#19e3ff',
   },
 
@@ -138,9 +138,9 @@ export default {
     }
     const poleMat = new THREE.MeshStandardMaterial({ color: 0x2a2c33, roughness: 0.5, metalness: 0.7 });
     scene.add(instanced(new THREE.CylinderGeometry(0.15, 0.22, 9, 8), poleMat, poles));
-    const headMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0xffc48a).multiplyScalar(6) });
+    const headMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0xffc48a).multiplyScalar(3.5) });
     scene.add(instanced(new THREE.BoxGeometry(4.8, 0.25, 0.6), headMat, heads, { cast: false }));
-    const poolMat = new THREE.MeshBasicMaterial({ map: radialTexture('rgba(255,190,120,0.55)', 'rgba(255,160,90,0)'), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false });
+    const poolMat = new THREE.MeshBasicMaterial({ map: radialTexture('rgba(255,190,120,0.35)', 'rgba(255,160,90,0)'), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false });
     const poolMesh = instanced(new THREE.PlaneGeometry(16, 22).rotateX(-Math.PI / 2), poolMat, pools, { cast: false });
     poolMesh.renderOrder = 1;
     scene.add(poolMesh);

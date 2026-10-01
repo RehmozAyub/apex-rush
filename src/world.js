@@ -47,7 +47,8 @@ export function buildWorld(def, glRenderer, quality, { asphalt }) {
   const hemi = new THREE.HemisphereLight(def.hemi.sky, def.hemi.ground, def.hemi.intensity);
   scene.add(hemi);
 
-  scene.add(buildTrackMeshes(track, def.trackStyle, glRenderer.capabilities.getMaxAnisotropy(), asphalt, shortcuts));
+  const trackGroup = buildTrackMeshes(track, def.trackStyle, glRenderer.capabilities.getMaxAnisotropy(), asphalt, shortcuts);
+  scene.add(trackGroup);
 
   const envScene = new THREE.Scene();
   envScene.add(createSky(def.sky, 400));
@@ -104,6 +105,7 @@ export function buildWorld(def, glRenderer, quality, { asphalt }) {
       sun.position.set(fx + sunDir.x * 350, focus.y + sunDir.y * 350, fz + sunDir.z * 350);
       sun.target.position.set(fx, focus.y, fz);
       if (scenery.update) scenery.update(dt, time, camera, focus);
+      trackGroup.userData.update(time);
     },
     setShadowQuality(q) {
       sun.castShadow = q.shadows;

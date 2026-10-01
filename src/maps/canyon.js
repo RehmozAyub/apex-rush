@@ -56,7 +56,7 @@ export default {
   layout: LAYOUTS.canyon,
   exposure: 0.98,
   envIntensity: 1.0,
-  bloom: { strength: 0.32, radius: 0.5, threshold: 1.05 },
+  bloom: { strength: 0.2, radius: 0.45, threshold: 1.15 },
   fog: { color: 0xd4a878, density: 0.00085 },
   sky: {
     top: 0x3a74c0, horizon: 0xecc294, bottom: 0xc8a070,

@@ -60,7 +60,7 @@ export default {
   layout: LAYOUTS.coast,
   exposure: 0.97,
   envIntensity: 1.0,
-  bloom: { strength: 0.38, radius: 0.55, threshold: 1.05 },
+  bloom: { strength: 0.24, radius: 0.45, threshold: 1.15 },
   fog: { color: 0xc98a66, density: 0.0005 },
   sky: {
     top: 0x28305e, horizon: 0xf09050, bottom: 0x6a4a5a,

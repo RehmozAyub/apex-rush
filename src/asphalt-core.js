@@ -208,15 +208,15 @@ export function generatePixels(o = {}, size = 'high') {
     }
   }
 
-  // 9) wet: puddles in the low spots (dark, mirror-smooth)
+  // 9) wet: puddles in the low spots (dark and glossy)
   if (o.wet) {
     for (let i = 0; i < N; i++) {
       hgt[i] *= 0.45; // water fills the texture: much softer relief, fewer glinting stones
       const p = n256[i] * 0.7 + n64[i] * 0.3;
-      if (p < 0.58) { rough[i] = Math.max(0.12, rough[i] * 0.6); continue; }
+      if (p < 0.58) { rough[i] = Math.max(0.24, rough[i] * 0.6); continue; }
       const t = Math.min(1, (p - 0.58) * 6);
       tint(i, 1 - 0.35 * t);
-      rough[i] += (0.03 - rough[i]) * t;
+      rough[i] += (0.17 - rough[i]) * t; // glossy, but not a mirror for the sun
       hgt[i] *= 1 - 0.85 * t;
     }
   }
