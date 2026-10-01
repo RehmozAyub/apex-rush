@@ -2,7 +2,7 @@
 // start handshake. The race itself runs in RaceSession + net/online.js.
 import { MAPS } from './maps/index.js';
 import { CARS, PAINTS, saveSettings } from './config.js';
-import { host, join } from './net/peer.js';
+import { host, join, onTick } from './net/peer.js';
 import { Online, NET_VERSION } from './net/online.js';
 import { CODE_CHARS } from './net/protocol.js';
 
@@ -24,6 +24,13 @@ export class OnlineFlow {
     this.index = { online: 0, join: 0, lobby: 0 };
     this.busy = false;
     this.build();
+    // test runs in background tabs (?netsim / ?pump): keep the game loop going at 60 fps
+    const q = new URLSearchParams(location.search);
+    if (q.has('netsim') || q.has('pump')) {
+      let last = 0;
+      // (only when the browser has stopped drawing frames itself)
+      onTick(() => { const t = performance.now(); if (game.renderer && t - (game.lastFrame ?? 0) > 50 && t - last >= 16.6) { last = t; game.frame(); } });
+    }
   }
 
   get active() { return !!this.net || !!this.room; }

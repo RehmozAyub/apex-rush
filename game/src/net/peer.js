@@ -146,6 +146,28 @@ export async function join(code) {
 }
 
 // --- simulated links (tests) --------------------------------------------------------
+// A steady tick from a worker: timers in a background tab are slowed to ~1/s, a worker's are not.
+// Test runs (?netsim / ?pump) use it to deliver delayed messages and to keep the game running.
+let ticker = null;
+const tickFns = new Set();
+export function onTick(fn) {
+  tickFns.add(fn);
+  if (!ticker) {
+    const src = 'setInterval(() => postMessage(0), 4);';
+    ticker = new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
+    ticker.onmessage = () => { for (const f of tickFns) f(); };
+  }
+  return () => tickFns.delete(fn);
+}
+const simQueue = [];
+function simLater(ms, fn) {
+  const at = performance.now() + ms;
+  let i = simQueue.length;
+  while (i > 0 && simQueue[i - 1].at > at) i--;
+  simQueue.splice(i, 0, { at, fn });
+  if (!simLater.on) { simLater.on = true; onTick(() => { const t = performance.now(); while (simQueue.length && simQueue[0].at <= t) simQueue.shift().fn(); }); }
+}
+
 // opts: { latency (s, one way), jitter (s), loss (0..1, fast channel only) }
 export const SIM = { latency: 0.05, jitter: 0.015, loss: 0.02 };
 
@@ -164,13 +186,13 @@ class SimLink extends Link {
     const at = Math.max(performance.now() + this.delay(), this.lastReliable + 0.1);
     this.lastReliable = at;
     const data = JSON.parse(JSON.stringify(obj));
-    setTimeout(() => this.post('msg', data), at - performance.now());
+    simLater(at - performance.now(), () => this.post('msg', data));
   }
   sendState(buf) {
     if (this.closed || Math.random() < this.opts.loss) return;
     const copy = buf.slice(0);
     this.bytesOut += buf.byteLength;
-    setTimeout(() => this.post('state', copy), this.delay());
+    simLater(this.delay(), () => this.post('state', copy));
   }
   deliver(kind, data) {
     if (this.closed) return;
@@ -190,7 +212,7 @@ export function simPair(opts = SIM) {
 }
 
 // ?netsim[=latencyMs] in the URL: online play between two tabs of this browser, no network
-function simMode() {
+export function simMode() {
   try { return new URLSearchParams(location.search).has('netsim'); } catch { return false; }
 }
 function simOpts() {
