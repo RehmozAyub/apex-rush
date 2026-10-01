@@ -248,7 +248,7 @@ function buildShortcut(sc, style) {
   }
   addBarriers(group, path, style.barrier, shw + 0.5, keepFor, false);
 
-  for (const r of sc.ramps) group.add(rampMesh(path, r, shw));
+  for (const r of sc.ramps) { group.add(rampMesh(path, r, shw)); group.add(rampGuides(path, r, shw, style)); }
   if (sc.fence) return group; // hidden shortcuts: no sign, a fence across the way in instead
 
   // sign at the fork
@@ -293,6 +293,17 @@ function rampTexture() {
   }
   g.fillStyle = 'rgba(0,0,0,0.85)';
   g.fillRect(0, 36, 256, 4);
+  // two big chevrons on the deck pointing up to the lip
+  for (const y0 of [90, 170]) {
+    g.beginPath();
+    g.moveTo(128, y0 - 36); g.lineTo(208, y0 + 20); g.lineTo(176, y0 + 20); g.lineTo(128, y0 - 14); g.lineTo(80, y0 + 20); g.lineTo(48, y0 + 20); g.closePath();
+    g.fillStyle = 'rgba(0,0,0,0.5)'; g.fill();
+    g.save(); g.translate(0, -4);
+    g.beginPath();
+    g.moveTo(128, y0 - 36); g.lineTo(208, y0 + 20); g.lineTo(176, y0 + 20); g.lineTo(128, y0 - 14); g.lineTo(80, y0 + 20); g.lineTo(48, y0 + 20); g.closePath();
+    g.fillStyle = '#ffd400'; g.fill();
+    g.restore();
+  }
   rampTex = new THREE.CanvasTexture(c);
   rampTex.colorSpace = THREE.SRGBColorSpace;
   return rampTex;
@@ -333,4 +344,52 @@ function rampMesh(path, r, shw) {
   m.castShadow = true;
   m.receiveShadow = true;
   return m;
+}
+
+// Leading up to a ramp: glowing chevrons on the road and a JUMP board on each side.
+let chevTex = null;
+function chevronTexture() {
+  if (chevTex) return chevTex;
+  const c = document.createElement('canvas');
+  c.width = 128; c.height = 128;
+  const g = c.getContext('2d');
+  g.beginPath();
+  g.moveTo(64, 10); g.lineTo(122, 70); g.lineTo(96, 70); g.lineTo(64, 38); g.lineTo(32, 70); g.lineTo(6, 70); g.closePath();
+  g.fillStyle = '#fff';
+  g.fill();
+  chevTex = new THREE.CanvasTexture(c);
+  return chevTex;
+}
+
+function rampGuides(path, r, shw, style) {
+  const group = new THREE.Group();
+  const lane = r.half ? r.half * shw * 0.45 : 0; // centre of the ramp across the road
+  const mat = new THREE.MeshBasicMaterial({ map: chevronTexture(), color: new THREE.Color(0xffd400).multiplyScalar(0.9), transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 });
+  const geo = new THREE.PlaneGeometry(r.half ? 3.2 : 5, r.half ? 3.2 : 5).rotateX(-Math.PI / 2);
+  for (const back of [34, 24, 14]) {
+    const p = path.pointAt(r.u0 - back, lane);
+    const m = new THREE.Mesh(geo, mat);
+    m.position.set(p.x, p.y + 0.04, p.z);
+    m.rotation.y = p.heading + Math.PI; // texture "up" points along the road
+    m.renderOrder = 2;
+    group.add(m);
+  }
+  const board = new THREE.MeshBasicMaterial({ map: textTexture('▲ JUMP ▲', { accent: style.accent ?? '#ff2d55', bg: '#ffd400', fg: '#111111', font: 'italic 900 150px Bahnschrift, "Segoe UI", sans-serif' }), toneMapped: false, side: THREE.DoubleSide });
+  const postMat = new THREE.MeshStandardMaterial({ color: 0x222226, roughness: 0.6, metalness: 0.5 });
+  const sides = r.half ? [r.half] : [-1, 1];
+  for (const sd of sides) {
+    const p = path.pointAt(r.u0 - 22, sd * (shw + 1.6));
+    const sign = new THREE.Group();
+    const b = new THREE.Mesh(new THREE.PlaneGeometry(3, 0.75), board);
+    b.position.y = 1.9;
+    sign.add(b);
+    const post = new THREE.Mesh(new THREE.BoxGeometry(0.1, 1.9, 0.1), postMat);
+    post.position.y = 0.95;
+    sign.add(post);
+    sign.position.set(p.x, p.y, p.z);
+    const back = path.pointAt(r.u0 - 60, 0);
+    sign.rotation.y = Math.atan2(back.x - p.x, back.z - p.z);
+    group.add(sign);
+  }
+  return group;
 }

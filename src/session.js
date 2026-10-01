@@ -317,8 +317,9 @@ export class RaceSession {
       if (!H || e.airTime < 0.35) continue;
       const air = Math.round(e.airTime * 10) / 10;
       if (e.trick && e.clean) {
-        const name = e.trick === 'roll' ? 'BARREL ROLL' : 'AERIAL DONUT';
-        this.scoreEvent(H, name, H.boost.event(RULES.takedownGain * 0.8 + e.airTime * 10));
+        const name = { roll: 'BARREL ROLL', spin: 'FLAT SPIN', donut: 'AERIAL DONUT' }[e.trick];
+        const bonus = e.trick === 'donut' ? 1.3 : 0.8;
+        this.scoreEvent(H, name, H.boost.event(RULES.takedownGain * bonus + e.airTime * 10));
       } else {
         this.scoreEvent(H, `AIR TIME ${air.toFixed(1)}s`, H.boost.event(8 + e.airTime * 14));
       }
@@ -395,9 +396,10 @@ export class RaceSession {
     // warn humans about a ricochet coming up behind them
     for (const H of this.humans) {
       const hv = H.car.vehicle;
+      const me = this.roadPos(H.car);
       H.incoming = !hv.wrecked && this.shots.some((sh) => {
-        if (sh.owner === H.car) return false;
-        const d = this.track.deltaS(sh.s, hv.s);
+        if (sh.owner === H.car || sh.sc !== me.sc) return false;
+        const d = this.roadOf(sh.sc).deltaS(sh.s, me.s);
         return d > 0 && d < 90;
       });
     }
@@ -481,8 +483,9 @@ export class RaceSession {
     } else if (kind === 'ricochet') {
       me.power = null;
       const R = PICKUP_RULES;
+      const at = this.roadPos(me);
       this.shots.push({
-        owner: me, s: pv.s + 4, lat: pv.lateral,
+        owner: me, sc: at.sc, s: at.s + 4, lat: at.lat,
         vs: Math.max(R.shotMinSpeed, pv.speed + R.shotSpeed),
         vl: (Math.random() < 0.5 ? -1 : 1) * (12 + Math.random() * 4),
         t: 0,
@@ -493,11 +496,12 @@ export class RaceSession {
     } else if (kind === 'oil') {
       me.power = null;
       const R = PICKUP_RULES;
-      const s = this.track.wrapS(pv.s - R.slickBehind);
-      const edge = this.track.halfWidth - R.slickHalfLat * 0.75; // keep the spill on the tarmac
-      const lat = Math.max(-edge, Math.min(edge, pv.lateral));
-      const p = this.track.pointAt(s, lat);
-      const sl = { owner: me, id: ++this.slickId, s, lat, t: R.slickLife };
+      const at = this.roadPos(me), road = this.roadOf(at.sc);
+      const s = at.sc ? Math.max(0, at.s - R.slickBehind) : this.track.wrapS(at.s - R.slickBehind);
+      const edge = Math.max(0, road.halfWidth - R.slickHalfLat * 0.75); // keep the spill on the road
+      const lat = Math.max(-edge, Math.min(edge, at.lat));
+      const p = road.pointAt(s, lat);
+      const sl = { owner: me, sc: at.sc, id: ++this.slickId, s, lat, t: R.slickLife };
       this.slicks.push(sl);
       this.pickVis.addSlick(sl.id, p.x, p.y, p.z, p.heading, R.slickHalfS, R.slickHalfLat);
       for (let k = 0; k < 14; k++) {
@@ -522,39 +526,60 @@ export class RaceSession {
   }
 
   // ricochet shots: fly ahead, bounce off the barriers, wreck the first rival they touch
+  // where a car is in the coordinates of the road it is on: { sc (null = main road), s, lat }
+  roadPos(c) {
+    const v = c.vehicle;
+    return v.onSC && v.sc ? { sc: v.sc, s: v.scU, lat: v.scLat ?? 0 } : { sc: null, s: v.s, lat: v.lateral };
+  }
+
+  roadOf(sc) { return sc ? sc.path : this.track; }
+
+  // ricochet shots follow whichever road they were fired on (a shortcut, then the main road
+  // after it merges back); they only hit cars on that same road
   updateShots(dt) {
-    const R = PICKUP_RULES, track = this.track;
+    const R = PICKUP_RULES;
     for (let i = this.shots.length - 1; i >= 0; i--) {
       const sh = this.shots[i];
-      const valid = (c) => c !== sh.owner && !c.vehicle.wrecked && c.vehicle.ghost <= 0;
+      const valid = (c) => c !== sh.owner && !c.vehicle.wrecked && c.vehicle.ghost <= 0 && !c.vehicle.air;
+      // along-road gap from the shot to car c, or null when c is on another road
+      const gap = (c) => { const at = this.roadPos(c); return at.sc !== sh.sc ? null : { ds: this.roadOf(sh.sc).deltaS(sh.s, at.s), lat: at.lat }; };
       let target = null, best = 90;
       for (const c of this.cars) {
         if (!valid(c)) continue;
-        const ds = track.deltaS(sh.s, c.vehicle.s);
-        if (ds > -1 && ds < best) { best = ds; target = { lat: c.vehicle.lateral }; }
+        const g = gap(c);
+        if (g && g.ds > -1 && g.ds < best) { best = g.ds; target = { lat: g.lat }; }
       }
       const steps = Math.max(1, Math.ceil(dt / (1 / 120)));
       let hitCar = null;
       for (let k = 0; k < steps && !hitCar; k++) {
-        if (stepShot(sh, dt / steps, track.halfWidth, target)) {
-          const p = track.pointAt(sh.s, sh.lat);
+        const road = this.roadOf(sh.sc);
+        if (stepShot(sh, dt / steps, road.halfWidth, target)) {
+          const p = road.pointAt(sh.s, sh.lat);
           this.fx.sparks(p.x + p.rx * Math.sign(sh.lat) * 0.6, p.y + 0.7, p.z + p.rz * Math.sign(sh.lat) * 0.6, 0, 0, 14, 1);
           const vol = this.audibility(p);
           if (vol > 0.05) this.game.audio.ping(vol);
         }
+        // off the end of a shortcut: carry on down the main road
+        if (sh.sc && sh.s >= sh.sc.path.length - 1) {
+          const p = sh.sc.path.pointAt(sh.s, sh.lat);
+          const q = this.track.project(p.x, p.z);
+          sh.sc = null; sh.s = q.s; sh.lat = Math.max(-this.track.halfWidth + 1, Math.min(this.track.halfWidth - 1, q.lateral));
+        }
         for (const c of this.cars) {
-          if (valid(c) && inBox(track.deltaS(sh.s, c.vehicle.s), c.vehicle.lateral, sh.lat, R.shotHitS, R.shotHitLat)) { hitCar = c; break; }
+          const g = valid(c) && gap(c);
+          if (g && inBox(g.ds, g.lat, sh.lat, R.shotHitS, R.shotHitLat)) { hitCar = c; break; }
         }
       }
+      const road = this.roadOf(sh.sc);
       if (hitCar || sh.t > R.shotLife) {
         this.pickVis.removeShot(sh.vis);
         this.shots.splice(i, 1);
-        const p = track.pointAt(sh.s, hitCar ? 0 : sh.lat);
+        const p = road.pointAt(sh.s, hitCar ? 0 : sh.lat);
         if (hitCar) this.takedown(hitCar, p.tx, p.tz, 'RICOCHET TAKEDOWN', false, sh.owner);
         else this.fx.sparks(p.x, p.y + 0.7, p.z, 0, 0, 30, 1.5);
         continue;
       }
-      const p = track.pointAt(sh.s, sh.lat);
+      const p = road.pointAt(sh.s, sh.lat);
       this.pickVis.showShot(sh.vis, p.x, p.y + 0.75, p.z, this.time);
       if (Math.random() < 0.9) this.fx.glow.spawn(p.x, p.y + 0.75, p.z, (Math.random() - 0.5) * 2, Math.random(), (Math.random() - 0.5) * 2, 0.35, 0.7, 6, 2.6, 0.4, { drag: 0.1 });
     }
@@ -568,8 +593,10 @@ export class RaceSession {
       sl.t -= dt;
       if (sl.t <= 0) { this.pickVis.removeSlick(sl.id); this.slicks.splice(i, 1); continue; }
       for (const c of this.cars) {
-        if (c === sl.owner || c.vehicle.wrecked || c.vehicle.ghost > 0 || c.vehicle.speed < 8) continue;
-        if (inBox(this.track.deltaS(sl.s, c.vehicle.s), c.vehicle.lateral, sl.lat, R.slickHalfS, R.slickHalfLat)) {
+        if (c === sl.owner || c.vehicle.wrecked || c.vehicle.ghost > 0 || c.vehicle.speed < 8 || c.vehicle.air) continue;
+        const at = this.roadPos(c);
+        if (at.sc !== sl.sc) continue; // on the other road
+        if (inBox(this.roadOf(sl.sc).deltaS(sl.s, at.s), at.lat, sl.lat, R.slickHalfS, R.slickHalfLat)) {
           const v = c.vehicle;
           v.yawRate += (Math.random() < 0.5 ? -1 : 1) * 6;
           this.takedown(c, -Math.cos(v.heading), Math.sin(v.heading), 'SLICKED', false, sl.owner);
@@ -669,7 +696,7 @@ export class RaceSession {
       for (let j = i + 1; j < cars.length; j++) {
         const A = cars[i].vehicle, B = cars[j].vehicle;
         if (A.ghost > 0 || B.ghost > 0) continue;
-        if (Math.abs(A.y - B.y) > 1.6) continue; // one of them is flying over the other
+        if (A.air || B.air || Math.abs(A.y - B.y) > 1.6) continue; // in the air off a ramp: no contact
         if (A.wrecked && B.wrecked) continue;
         const dx0 = B.x - A.x, dz0 = B.z - A.z;
         if (dx0 * dx0 + dz0 * dz0 > 36) continue;
@@ -730,7 +757,10 @@ export class RaceSession {
     } else {
       // an AI rammed a human: 'playerWrecked' when the AI supplied almost all the closing speed
       const kind = classifyImpact({ closing, playerShare: 1 - share }, victim.human.assistOn ? ASSIST_RULES : RULES);
-      if (kind === 'playerWrecked') this.crashHuman(victim.human, 'TAKEN OUT', nx * dir, nz * dir, attacker);
+      if (kind === 'playerWrecked') {
+        attacker.kills = (attacker.kills || 0) + 1;
+        this.crashHuman(victim.human, 'TAKEN OUT', nx * dir, nz * dir, attacker);
+      }
     }
   }
 
@@ -740,8 +770,9 @@ export class RaceSession {
     if (hit.vn > 3) this.fx.sparks(hit.x, hit.y, hit.z, v.vx, v.vz, Math.min(30, hit.vn * 2), Math.min(2, hit.vn / 12));
     if (v.wrecked || this.state !== 'racing') return;
     const H = c.human;
+    const flying = v.air || v.landCool > 0; // off a ramp or just landed: walls only bounce
     if (H) {
-      if (!H.finished && isWallCrash({ speed: hit.speed, angleDeg: hit.angle }, H.assistOn ? ASSIST_RULES : RULES)) {
+      if (!H.finished && !flying && isWallCrash({ speed: hit.speed, angleDeg: hit.angle }, H.assistOn ? ASSIST_RULES : RULES)) {
         this.crashHuman(H, 'WRECKED', hit.nx, hit.nz);
       } else if (hit.vn > 4 && this.impactCooldown <= 0) {
         this.game.audio.impact(Math.min(1, hit.vn / 18));
@@ -750,7 +781,7 @@ export class RaceSession {
         this.impactCooldown = 0.15;
       }
     }
-    if (c.pushedBy && c.pushedBy !== c && isPushTakedown({ sincePush: this.time - c.pushedAt, wallSpeed: hit.vn })) {
+    if (!flying && c.pushedBy && c.pushedBy !== c && isPushTakedown({ sincePush: this.time - c.pushedAt, wallSpeed: hit.vn })) {
       this.takedown(c, hit.nx, hit.nz, 'TAKEDOWN!', false, c.pushedBy);
     }
   }
@@ -772,6 +803,7 @@ export class RaceSession {
     }
     c.pushedAt = -99;
     c.pushedBy = null;
+    if (byCar && byCar !== c) byCar.kills = (byCar.kills || 0) + 1; // for the results table
     const by = byCar && byCar !== c ? byCar.human : null;
     if (!by) return;
     by.takedowns++;
@@ -998,7 +1030,7 @@ export class RaceSession {
       return {
         pos: i + 1, name: c.name, car: c.spec.name, isPlayer: c.isPlayer, paint: c.paint,
         time: e.finished ? e.finishTime : null, best: e.bestLap,
-        takedowns: c.human ? c.human.takedowns : null,
+        takedowns: c.human ? c.human.takedowns : c.kills || 0,
       };
     });
   }

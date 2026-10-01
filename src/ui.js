@@ -73,7 +73,7 @@ export class UI {
             <h2>DRIVE ASSIST</h2>
             <p>On by default: you steer, it helps. It nudges you away from the walls, calms over-steering, brakes for bends you'd miss and makes wall hits less punishing. Press <b>H</b> in a race (or use the pause menu) to drive fully manual.</p>
             <h2>RIVALS &amp; SECRETS</h2>
-            <p>Whoever wrecks you becomes your <b>RIVAL</b>: take them out for a big <b>PAYBACK</b> boost. Every track hides <b>shortcuts</b> (some behind fences, some with <b>ramps</b>: hold drift and steer as you take off for a spin or barrel roll) and four <b>signature takedown</b> spots. Earn <b>three stars</b> per track (win, 5 takedowns, no crashes) and unlock new paints with takedowns and stars.</p>
+            <p>Whoever wrecks you becomes your <b>RIVAL</b>: take them out for a big <b>PAYBACK</b> boost. Every track hides <b>shortcuts</b> (some behind fences, some with <b>ramps</b>: drift into the jump for a <b>flat spin</b>, keep holding drift for an <b>aerial donut</b>, or <b>barrel roll</b> off a half ramp) and four <b>signature takedown</b> spots. Earn <b>three stars</b> per track (win, 5 takedowns, no crashes) and unlock new paints with takedowns and stars.</p>
             <h2>POWER-UPS</h2>
             <p class="note">Every block shows what's inside. Drive through one to grab it (a new one replaces the one you hold). Rivals use them too.</p>
             ${POWER_IDS.map((id) => `<p class="pw">${icon(id)}<b style="color:${POWERS[id].color}">${POWERS[id].name}</b> ${POWERS[id].desc.toLowerCase()}</p>`).join('')}
