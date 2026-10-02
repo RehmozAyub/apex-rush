@@ -63,7 +63,7 @@ export class OnlineFlow {
     </section>`);
     this.hudPing = document.createElement('div');
     this.hudPing.className = 'o-hudping';
-    this.ui.screens.hud.appendChild(this.hudPing);
+    root.appendChild(this.hudPing); // not inside the HUD: that is rebuilt for every race
 
     const name = root.querySelector('#o-name');
     name.addEventListener('input', () => { const v = cleanName(name.value); if (name.value.toUpperCase() !== v && name.value.trim().toUpperCase() !== v) name.value = v; });
