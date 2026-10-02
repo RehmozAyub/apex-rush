@@ -551,5 +551,5 @@ body.touch #tc.on { display: block; position: absolute; inset: 0; pointer-events
 .o-card em { font-style: normal; font-size: 2.2vh; color: var(--yellow); }
 .o-card.empty { border-left-color: rgba(255,255,255,0.2); justify-content: center; }
 .o-card.empty b { opacity: 0.45; font-size: 2.8vh; }
-.o-hudping { position: absolute; right: 2vh; bottom: 1.2vh; font-size: 1.7vh; letter-spacing: 0.12em; opacity: 0; color: rgba(255,255,255,0.75); transition: opacity 0.3s; }
+.o-hudping { position: absolute; right: calc(2vh + var(--sr, 0px)); bottom: 0.6vh; z-index: 3; font-size: 1.7vh; letter-spacing: 0.12em; opacity: 0; color: rgba(255,255,255,0.75); transition: opacity 0.3s; }
 .o-hudping.show { opacity: 1; }
